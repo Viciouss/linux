@@ -715,6 +715,13 @@ config LEDS_IS31FL32XX
 	  LED controllers. They are I2C devices with multiple constant-current
 	  channels, each with independent 256-level PWM control.
 
+config LEDS_ISA1200
+	tristate "LES support for the ISA1200 motor"
+	default n
+	depends on I2C
+	help
+	  Say Y to enalbe the ISA1200 IC.
+
 config LEDS_SC27XX_BLTC
 	tristate "LED support for the SC27xx breathing light controller"
 	depends on LEDS_CLASS && MFD_SC27XX_PMIC
