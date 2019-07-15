@@ -224,6 +224,9 @@ static const uint32_t fimd_formats[] = {
 	DRM_FORMAT_RGB565,
 	DRM_FORMAT_XRGB8888,
 	DRM_FORMAT_ARGB8888,
+	DRM_FORMAT_ABGR8888,
+	DRM_FORMAT_XRGB8888,
+	DRM_FORMAT_XBGR8888,
 };
 
 static const unsigned int capabilities[WINDOWS_NR] = {
