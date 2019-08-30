@@ -348,6 +348,11 @@ __ca9_errata:
 	orreq	r0, r0, #1 << 22		@ set bit #22
 	mcreq	p15, 0, r0, c15, c0, 1		@ write diagnostic register
 #endif
+#ifdef CONFIG_ARM_ERRATA_761320
+	mrc	p15, 0, r10, c15, c0, 1		@ read diagnostic register
+	orr	r10, r10, #1 << 21		@ set bit #21
+	mcr	p15, 0, r10, c15, c0, 1		@ write diagnostic register
+#endif
 #ifdef CONFIG_ARM_ERRATA_743622
 	teq	r3, #0x00200000			@ only present in r2p*
 	mrceq	p15, 0, r0, c15, c0, 1		@ read diagnostic register
