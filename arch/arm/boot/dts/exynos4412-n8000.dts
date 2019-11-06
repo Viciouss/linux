@@ -33,7 +33,7 @@
 
 	chosen {
 		// tty0 for the display and serial output via ttyS2 for early console and ttySAC2 for normal console
-		bootargs = "root=/dev/mmcblk2p9 rw loglevel=8 lpj=3981312 vmalloc=256m oops=panic consoleblank=0 earlyprintk rdinit=/linuxrc console=ttySAC2 console=tty0";
+		bootargs = "root=/dev/mmcblk2p9 rw loglevel=8 lpj=3981312 vmalloc=256m oops=panic consoleblank=0 earlyprintk init=/linuxrc console=ttySAC2 console=tty0";
 		stdout-path = "serial2:115200n8";
 	};
 
@@ -84,6 +84,8 @@
 
 	wlan_pwrseq: sdhci3-pwrseq {
 		compatible = "mmc-pwrseq-simple";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_on &wifi_host_wake>;
 		reset-gpios = <&gpm3 5 GPIO_ACTIVE_LOW>;
 		clocks = <&max77686 MAX77686_CLK_PMIC>;
 		clock-names = "ext_clock";
@@ -97,35 +99,59 @@
 		power-domains = <&pd_lcd0>;
 	};
 
-	test {
+	i2c_stmpe_adc: i2c@19 {	
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpm4 1 GPIO_ACTIVE_HIGH>;
+		scl-gpios = <&gpm4 0 GPIO_ACTIVE_HIGH>;
+
+		i2c-gpio,delay-us = <5>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+		status = "okay";
 
-		led-controller@30 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			compatible = "panasonic,an30259a";
-			reg = <0x30>;
-			
-			led@1 {
-				reg = <1>;
-				linux,default-trigger = "heartbeat";
-				label = "red:indicator";
-			};
+		stmpe811adc@41 {
+			compatible = "st,stmpe811";
+			reg = <0x41>;
+			interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+			interrupt-parent = <&gpx0>;
+			interrupt-controller;
+			blocks = <0x5>;
+			irq-trigger = <0x1>;
+			// Common ADC settings
+			// 1.625 MHz ADC clock speed
+			st,adc-freq = <0>;
+			// 12-bit ADC
+			st,mod-12b = <1>;
+			// internal ADC reference
+			st,ref-sel = <0>;
+			// ADC converstion time: 64 clocks
+			st,sample-time = <3>;
+			status = "okay";
 
-			led@2 {
-				reg = <2>;
-				label = "green:indicator";
-			};
-
-			led@3 {
-				reg = <3>;
-				label = "blue:indicator";
+			stmpe_adc {
+				compatible = "st,stmpe-adc";
+				// only allow requests on channel 4 (mic jack), channel 6 (battery temp?) and channel 7 (30 pin connector resistor)
+				st,norequest-mask = <0x0F>;
 			};
 		};
+
 	};
 
-	
+	i2c_ak8975: i2c@10 {
+		compatible = "i2c-gpio";
+		gpios = <&gpy2 4 GPIO_ACTIVE_HIGH>, <&gpy2 5 GPIO_ACTIVE_HIGH>;
+		
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		ak8975@c {
+			compatible = "asahi-kasei,ak8975";
+			reg = <0x0c>;
+			gpios = <&gpm4 7 GPIO_ACTIVE_HIGH>;
+		};
+	};
 
 };
 
@@ -184,6 +210,33 @@
 &cpu0 {
 	cpu0-supply = <&buck2_reg>;
 };
+
+&exynos_usbphy {
+	status = "okay";
+};
+
+&ehci {
+	status = "okay";
+	port@1 {
+		status = "okay";
+	};
+	port@2 {
+		status = "okay";
+	};
+};
+
+&ohci {
+	status = "okay";
+	port@0 {
+		status = "okay";
+	};
+};
+
+&hsotg {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
 
 &dsi_0 {
 	vddcore-supply = <&ldo8_reg>;
@@ -305,19 +358,42 @@
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 				regulator-always-on;
+				regulator-boot-on;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
 			};
 
 			ldo5_reg: LDO5 {
 				regulator-name = "VCC_1.8V_IO";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
-				regulator-always-on;
+
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
 			};
 
 			ldo8_reg: LDO8 {
 				regulator-name = "VMIPI_1.0V";
 				regulator-min-microvolt = <1000000>;
 				regulator-max-microvolt = <1000000>;
+				regulator-always-on;
+				regulator-boot-on;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
+			};
+
+			ldo9_reg: LDO9 {
+				regulator-name = "VLED_IC_1.9V";
+				regulator-min-microvolt = <1950000>;
+				regulator-max-microvolt = <1950000>;
+				regulator-always-on;
+				regulator-boot-on;
+
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -327,8 +403,11 @@
 				regulator-name = "VMIPI_1.8V";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
+				regulator-boot-on;
+
 				regulator-state-mem {
-					regulator-off-in-suspend;
+					regulator-on-in-suspend;
 				};
 			};
 
@@ -337,6 +416,8 @@
 				regulator-min-microvolt = <1950000>;
 				regulator-max-microvolt = <1950000>;
 				regulator-always-on;
+				regulator-boot-on;
+
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -346,8 +427,11 @@
 				regulator-name = "VUOTG_3.0V";
 				regulator-min-microvolt = <3000000>;
 				regulator-max-microvolt = <3000000>;
+				regulator-always-on;
+				regulator-boot-on;
+
 				regulator-state-mem {
-					regulator-off-in-suspend;
+					regulator-on-in-suspend;
 				};
 			};
 
@@ -356,6 +440,8 @@
 				regulator-min-microvolt = <1950000>;
 				regulator-max-microvolt = <1950000>;
 				regulator-always-on;
+				regulator-boot-on;
+
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -365,12 +451,20 @@
 				regulator-name = "CAM_IO_1.8V";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
 			};
 
 			ldo19_reg: LDO19 {
 				regulator-name = "VT_CORE_1.8V";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
 			};
 
 			ldo21_reg: LDO21 {
@@ -378,6 +472,10 @@
 				regulator-min-microvolt = <2800000>;
 				regulator-max-microvolt = <2800000>;
 				maxim,ena-gpios = <&gpy0 4 GPIO_ACTIVE_HIGH>;
+
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
 			};
 
 			ldo23_reg: LDO23 {
@@ -385,6 +483,8 @@
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-always-on;
+				regulator-boot-on;
+
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -394,18 +494,30 @@
 				regulator-name = "CAM_A2.8V";
 				regulator-min-microvolt = <2800000>;
 				regulator-max-microvolt = <2800000>;
+
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
 			};
 
 			ldo25_reg: LDO25 {
 				regulator-name = "VLED_3.3V";
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
+
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
 			};
 
 			ldo26_reg: LDO26 {
 				regulator-name = "3MP_AF_2.8V";
 				regulator-min-microvolt = <2800000>;
 				regulator-max-microvolt = <2800000>;
+
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
 			};
 
 			buck1_reg: BUCK1 {
@@ -414,9 +526,6 @@
 				regulator-max-microvolt = <1050000>;
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-state-mem {
-					regulator-off-in-suspend;
-				};
 			};
 
 			buck2_reg: BUCK2 {
@@ -425,9 +534,6 @@
 				regulator-max-microvolt = <1500000>;
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-state-mem {
-					regulator-on-in-suspend;
-				};
 			};
 
 			buck3_reg: BUCK3 {
@@ -436,9 +542,6 @@
 				regulator-max-microvolt = <1100000>;
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-state-mem {
-					regulator-off-in-suspend;
-				};
 			};
 
 			buck4_reg: BUCK4 {
@@ -446,15 +549,16 @@
 				regulator-min-microvolt = <850000>;
 				regulator-max-microvolt = <1075000>;
 				regulator-boot-on;
-				regulator-state-mem {
-					regulator-off-in-suspend;
-				};
+				
 			};
 
 			buck9_reg: BUCK9 {
 				regulator-name = "3MP_CORE_1.2V";
-				regulator-min-microvolt = <1000000>;
+				regulator-min-microvolt = <1200000>;
 				regulator-max-microvolt = <1200000>;
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
 			};
 		};
 	};
@@ -639,7 +743,7 @@
 
 &pinctrl_1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep1 &uart_sel>;
+	pinctrl-0 = <&sleep1 &uart_sel &usb_30pin_init &usb_otg_en>;
 
 	uart_sel: uart-sel {
 		samsung,pins = "gpl2-7";
@@ -649,9 +753,29 @@
 		samsung,pin-val = <1>;
 	};
 
+	usb_otg_en: usb-otg-en {
+		samsung,pins = "gpl2-6";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+		samsung,pin-val = <0>;
+	};
+
+	usb_30pin_init: usb-30pin-init {
+		samsung,pins = "gpx1-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
 	gpio_keys: gpio-keys {
 		samsung,pins = "gpx2-2", "gpx2-7", "gpx3-3";
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	wifi_host_wake: wifi-host-wake {
+		samsung,pins = "gpx2-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
 	};
 
 	max77686_irq: max77686-irq {
@@ -686,6 +810,13 @@
 		samsung,pins = "gpm2-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	wifi_on: wifi-on {
+		samsung,pins = "gpm3-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-val = <1>;
 	};
 
 	sleep1: sleep-states {
