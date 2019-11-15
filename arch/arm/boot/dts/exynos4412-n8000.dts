@@ -84,8 +84,6 @@
 
 	wlan_pwrseq: sdhci3-pwrseq {
 		compatible = "mmc-pwrseq-simple";
-		pinctrl-names = "default";
-		pinctrl-0 = <&wifi_on &wifi_host_wake>;
 		reset-gpios = <&gpm3 5 GPIO_ACTIVE_LOW>;
 		clocks = <&max77686 MAX77686_CLK_PMIC>;
 		clock-names = "ext_clock";
@@ -588,12 +586,10 @@
 	#size-cells = <0>;
 	non-removable;
 	bus-width = <4>;
-	cap-sd-highspeed;
-	cap-mmc-highspeed;
 	mmc-pwrseq = <&wlan_pwrseq>;
 
 	pinctrl-names = "default";
-	pinctrl-0 = <&sd3_clk &sd3_cmd &sd3_wifi>;
+	pinctrl-0 = <&sd3_clk &sd3_cmd &sd3_wifi &wifi_on &wifi_host_wake>;
 	status = "okay";
 
 	brcmf: wifi@1 {

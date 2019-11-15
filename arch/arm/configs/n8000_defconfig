@@ -4,7 +4,7 @@
 #
 
 #
-# Compiler: arm-linux-gcc.br_real (Buildroot 2019.08.1) 8.3.0
+# Compiler: arm-linux-gcc.br_real (Buildroot 2019.11-rc1) 8.3.0
 #
 CONFIG_CC_IS_GCC=y
 CONFIG_GCC_VERSION=80300
@@ -2293,16 +2293,9 @@ CONFIG_S3C2410_WATCHDOG=y
 #
 # CONFIG_USBPCWATCHDOG is not set
 CONFIG_SSB_POSSIBLE=y
-CONFIG_SSB=m
-CONFIG_SSB_SDIOHOST_POSSIBLE=y
-CONFIG_SSB_SDIOHOST=y
-# CONFIG_SSB_DRIVER_GPIO is not set
+# CONFIG_SSB is not set
 CONFIG_BCMA_POSSIBLE=y
-CONFIG_BCMA=m
-# CONFIG_BCMA_HOST_SOC is not set
-# CONFIG_BCMA_DRIVER_GMAC_CMN is not set
-# CONFIG_BCMA_DRIVER_GPIO is not set
-# CONFIG_BCMA_DEBUG is not set
+# CONFIG_BCMA is not set
 
 #
 # Multifunction device drivers
@@ -3278,8 +3271,6 @@ CONFIG_USB_OHCI_EXYNOS=y
 # CONFIG_USB_OHCI_HCD_PLATFORM is not set
 # CONFIG_USB_SL811_HCD is not set
 # CONFIG_USB_R8A66597_HCD is not set
-# CONFIG_USB_HCD_BCMA is not set
-# CONFIG_USB_HCD_SSB is not set
 # CONFIG_USB_HCD_TEST_MODE is not set
 
 #
