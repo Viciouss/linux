@@ -172,6 +172,27 @@
 		};
 	};
 
+	i2c_max14072: i2c@14 {
+		compatible = "i2c-gpio";
+		gpios = <&gpy0 2 GPIO_ACTIVE_HIGH>, <&gpy0 3 GPIO_ACTIVE_HIGH>;
+		
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		max17042@36 {
+			compatible = "maxim,max17042";
+			reg = <0x36>;
+			interrupts = <3 IRQ_TYPE_EDGE_FALLING>;
+			interrupt-parent = <&gpx2>;
+			maxim,rsns-microohm = <10000>;
+			maxim,over-heat-temp = <600>;
+			maxim,over-volt = <4300>;
+		};
+	};
+
+
 };
 
 &adc {
