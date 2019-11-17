@@ -82,6 +82,27 @@
 		};
 	};
 
+	tsp_ldo_on: voltage-regulator-1 {
+		compatible = "regulator-fixed";
+		regulator-name = "TSP_LDO_ON";
+		gpio = <&gpm4 5 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	tsp_ldo_on1: voltage-regulator-2 {
+		compatible = "regulator-fixed";
+		regulator-name = "TSP_LDO_ON1";
+		gpio = <&gpb 5 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	tsp_ldo_on2: voltage-regulator-3 {
+		compatible = "regulator-fixed";
+		regulator-name = "TSP_LDO_ON2";
+		gpio = <&gpb 7 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
 	wlan_pwrseq: sdhci3-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		reset-gpios = <&gpm3 5 GPIO_ACTIVE_LOW>;
@@ -318,7 +339,7 @@
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <400000>;
-	pinctrl-0 = <&i2c3_bus &touch_init_0 &touch_init_1 &touch_init_int &touch_on_int &touch_on_0>;
+	pinctrl-0 = <&i2c3_bus>;
 	pinctrl-names = "default";
 	status = "okay";
 
@@ -328,7 +349,10 @@
 		reset-gpios = <&gpm0 4 GPIO_ACTIVE_HIGH>;
 		interrupt-parent = <&gpm2>;
 		interrupts = <3 IRQ_TYPE_LEVEL_LOW>;
-		linux,gpio-keymap = <0 0 0 BTN_LEFT>;
+		pinctrl-0 = <&tsp_ldo_init &tsp_rst &tsp_int>;
+		pinctrl-names = "default";
+		vmmc-supply = <&tsp_ldo_on &tsp_ldo_on1 &tsp_ldo_on2>;
+		linux,gpio-keymap = <KEY_RESERVED KEY_RESERVED KEY_RESERVED BTN_TOUCH>;
 	};
 };
 
@@ -351,6 +375,7 @@
 
 		voltage-regulators {
 			
+			// WM8994 audio
 			ldo3_reg: LDO3 {
 				regulator-name = "VCC_1.8V_AP";
 				regulator-min-microvolt = <1800000>;
@@ -363,6 +388,7 @@
 				};
 			};
 
+			// ?
 			ldo5_reg: LDO5 {
 				regulator-name = "VCC_1.8V_IO";
 				regulator-min-microvolt = <1800000>;
@@ -373,6 +399,7 @@
 				};
 			};
 
+			// CAMERA/LCD/HDMI
 			ldo8_reg: LDO8 {
 				regulator-name = "VMIPI_1.0V";
 				regulator-min-microvolt = <1000000>;
@@ -385,6 +412,7 @@
 				};
 			};
 
+			// IRDA: on/off
 			ldo9_reg: LDO9 {
 				regulator-name = "VLED_IC_1.9V";
 				regulator-min-microvolt = <1950000>;
@@ -397,6 +425,7 @@
 				};
 			};
 
+			// CAMERA/LCD/HDMI
 			ldo10_reg: LDO10 {
 				regulator-name = "VMIPI_1.8V";
 				regulator-min-microvolt = <1800000>;
@@ -409,6 +438,7 @@
 				};
 			};
 
+			// ?
 			ldo11_reg: LDO11 {
 				regulator-name = "VABB1_1.9V";
 				regulator-min-microvolt = <1950000>;
@@ -421,6 +451,7 @@
 				};
 			};
 
+			// ?
 			ldo12_reg: LDO12 {
 				regulator-name = "VUOTG_3.0V";
 				regulator-min-microvolt = <3000000>;
@@ -433,6 +464,7 @@
 				};
 			};
 
+			// ?
 			ldo14_reg: LDO14 {
 				regulator-name = "VABB2_1.9V";
 				regulator-min-microvolt = <1950000>;
@@ -445,6 +477,7 @@
 				};
 			};
 
+			// CAM: ISX012
 			ldo18_reg: LDO18 {
 				regulator-name = "CAM_IO_1.8V";
 				regulator-min-microvolt = <1800000>;
@@ -455,6 +488,7 @@
 				};
 			};
 
+			// CAM: S5K6A3
 			ldo19_reg: LDO19 {
 				regulator-name = "VT_CORE_1.8V";
 				regulator-min-microvolt = <1800000>;
@@ -465,6 +499,7 @@
 				};
 			};
 
+			// MMC2
 			ldo21_reg: LDO21 {
 				regulator-name = "VTF_2.8V";
 				regulator-min-microvolt = <2800000>;
@@ -476,6 +511,7 @@
 				};
 			};
 
+			// ?
 			ldo23_reg: LDO23 {
 				regulator-name = "VDD_ADC_3.3V";
 				regulator-min-microvolt = <3300000>;
@@ -488,6 +524,7 @@
 				};
 			};
 
+			// CAM: S5K6A3
 			ldo24_reg: LDO24 {
 				regulator-name = "CAM_A2.8V";
 				regulator-min-microvolt = <2800000>;
@@ -498,6 +535,7 @@
 				};
 			};
 
+			// IRDA: sending
 			ldo25_reg: LDO25 {
 				regulator-name = "VLED_3.3V";
 				regulator-min-microvolt = <3300000>;
@@ -508,6 +546,7 @@
 				};
 			};
 
+			// CAM: ISX012
 			ldo26_reg: LDO26 {
 				regulator-name = "3MP_AF_2.8V";
 				regulator-min-microvolt = <2800000>;
@@ -518,6 +557,7 @@
 				};
 			};
 
+			// exynos4412-busfreq
 			buck1_reg: BUCK1 {
 				regulator-name = "vdd_mif";
 				regulator-min-microvolt = <850000>;
@@ -526,6 +566,7 @@
 				regulator-boot-on;
 			};
 
+			// cpu freq
 			buck2_reg: BUCK2 {
 				regulator-name = "vdd_arm";
 				regulator-min-microvolt = <850000>;
@@ -534,6 +575,7 @@
 				regulator-boot-on;
 			};
 
+			// exynoss4412-busfreq
 			buck3_reg: BUCK3 {
 				regulator-name = "vdd_int";
 				regulator-min-microvolt = <850000>;
@@ -542,6 +584,7 @@
 				regulator-boot-on;
 			};
 
+			// mali GPU
 			buck4_reg: BUCK4 {
 				regulator-name = "vdd_g3d";
 				regulator-min-microvolt = <850000>;
@@ -550,6 +593,7 @@
 				
 			};
 
+			// CAM: ISX012
 			buck9_reg: BUCK9 {
 				regulator-name = "3MP_CORE_1.2V";
 				regulator-min-microvolt = <1200000>;
@@ -626,18 +670,10 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&sleep0>;
 
-	touch_on_0: touch-on-0 {
-		samsung,pins = "gpb-5", "gpb-7";
-		samsung,pin-function = <EXYNOS_PIN_FUNC_3>;
-		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
-		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
-	};
-
-	touch_init_0: touch-init-0 {
+	tsp_ldo_init: tsp-ldo-init {
 		samsung,pins = "gpb-5", "gpb-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
-		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
 		samsung,pin-val = <1>;
 	};
 
@@ -791,20 +827,14 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
 	};
 
-	touch_init_1: touch-init-1 {
+	tsp_rst: tsp-rst {
 		samsung,pins = "gpm0-4", "gpm4-5";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-val = <1>;
 	};
 
-	touch_init_int: touch-init-int {
-		samsung,pins = "gpm2-3";
-		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
-		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
-	};
-
-	touch_on_int: touch-on-int {
+	tsp_int: tsp-int {
 		samsung,pins = "gpm2-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
