@@ -172,9 +172,31 @@
 		};
 	};
 
+	/* i2c_smb347: i2c@13 {
+		compatible = "i2c-gpio";
+		gpios = <&gpm2 0 GPIO_ACTIVE_HIGH>,
+				<&gpm2 1 GPIO_ACTIVE_HIGH>;
+
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		smb347@6 {
+			compatible = "sme,smb347";
+			reg = <0x6>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&charger_change>;
+			gpios = <&gpm4 2 GPIO_ACTIVE_HIGH>, // enable
+					<&gpm0 3 GPIO_ACTIVE_HIGH>, // stat
+					<&gpx1 4 GPIO_ACTIVE_HIGH>; // ta_nconnected
+		};
+	}; */
+
 	i2c_max14072: i2c@14 {
 		compatible = "i2c-gpio";
-		gpios = <&gpy0 2 GPIO_ACTIVE_HIGH>, <&gpy0 3 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpy0 2 GPIO_ACTIVE_HIGH>,
+				<&gpy0 3 GPIO_ACTIVE_HIGH>;
 		
 		i2c-gpio,delay-us = <2>;
 		#address-cells = <1>;
@@ -627,6 +649,11 @@
 	};
 };
 
+&gpu {
+	mali-supply = <&buck4_reg>;
+	status = "okay";
+};
+
 &i2s0 {
 	pinctrl-0 = <&i2s0_bus>;
 	pinctrl-names = "default";
@@ -871,6 +898,12 @@
 	sd3_wifi: sd3-wifi {
 		samsung,pins = "gpk3-3", "gpk3-4", "gpk3-5", "gpk3-6";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	charger_change: charger-change {
+		samsung,pins = "gpm0-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
