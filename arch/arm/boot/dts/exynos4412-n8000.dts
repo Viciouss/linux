@@ -103,6 +103,23 @@
 		enable-active-high;
 	};
 
+	wm1811_spkvdd: fixed-regulator-spkvdd {
+		compatible = "regulator-fixed";
+		regulator-name = "VBATT";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	mic_bias_reg: mic-bias-reg {
+		compatible = "regulator-fixed";
+		regulator-name = "MICBIAS_LDO_2.8V";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		gpio = <&gpm0 0 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
 	wlan_pwrseq: sdhci3-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		reset-gpios = <&gpm3 5 GPIO_ACTIVE_LOW>;
@@ -214,6 +231,47 @@
 		};
 	};
 
+	sound: sound {
+		compatible = "samsung,midas-audio";
+		model = "WM1811 @ N8000";
+		mic-bias-supply = <&mic_bias_reg>;
+		lineout-sel-gpios = <&gpj1 2 GPIO_ACTIVE_HIGH>;
+		i2s-controller = <&i2s0>;
+		audio-codec = <&wm1811>;
+		samsung,audio-routing =
+			"HP", "HPOUT1L",
+			"HP", "HPOUT1R",
+
+			"SPK", "SPKOUTLN",
+			"SPK", "SPKOUTLP",
+			"SPK", "SPKOUTRN",
+			"SPK", "SPKOUTRP",
+
+			"RCV", "HPOUT2N",
+			"RCV", "HPOUT2P",
+
+			"LINE", "LINEOUT2N",
+			"LINE", "LINEOUT2P",
+
+			"HDMI", "LINEOUT1N",
+			"HDMI", "LINEOUT1P",
+
+/*			"IN1LP", "MICBIAS1",
+			"IN1LN", "MICBIAS1",
+			"MICBIAS1", "Main Mic",
+
+			"IN1RP", "Sub Mic",
+			"IN1RN", "Sub Mic",
+
+			"IN2LP:VXRN", "MICBIAS2",
+			"MICBIAS2", "Headset Mic",
+*/
+			"IN2RN", "FM In",
+			"IN2RP:VXRP", "FM In",
+
+			"IN2RN", "Third Mic",
+			"IN2RP:VXRP", "Third Mic";
+	};
 
 };
 
@@ -355,6 +413,13 @@
 	status = "okay";
 };
 
+&pmu_system_controller {
+	compatible = "samsung,exynos4210-pmu", "syscon", "simple-mfd";
+	assigned-clocks = <&pmu_system_controller 0>;
+	assigned-clock-parents =  <&clock CLK_XUSBXTI>;
+};
+
+
 &fimd {
 	pinctrl-0 = <&lcd_clk &lcd_data24 &pwm1_out>;
 	pinctrl-names = "default";
@@ -378,12 +443,24 @@
 	};
 };
 
+&i2c_0 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	status = "okay";
+};
+
+&i2c_1 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	status = "okay";
+};
+
 &i2c_3 {
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <400000>;
-	pinctrl-0 = <&i2c3_bus>;
-	pinctrl-names = "default";
 	status = "okay";
 
 	touchscreen@4a {
@@ -399,12 +476,63 @@
 	};
 };
 
+&i2c_4 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <100000>;
+	status = "okay";
+
+	wm1811: wm1811@1a {
+		compatible = "wlf,wm1811";
+		reg = <0x1a>;
+		
+		clocks = <&pmu_system_controller 0>,
+				<&max77686 MAX77686_CLK_PMIC>;
+		clock-names = "MCLK1", "MCLK2";
+		
+		gpio-controller;
+		#gpio-cells = <2>;
+
+		AVDD2-supply = <&wm1811_spkvdd>;
+		DCVDD-supply = <&ldo3_reg>;
+		CPVDD-supply = <&wm1811_spkvdd>;
+		DBVDD1-supply = <&ldo3_reg>;
+		DBVDD2-supply = <&wm1811_spkvdd>;
+		DBVDD3-supply = <&wm1811_spkvdd>;
+		SPKVDD1-supply = <&wm1811_spkvdd>;
+		SPKVDD2-supply = <&wm1811_spkvdd>;
+		
+		wlf,micbias-cfg = <0x2F 0x27>;
+		wlf,gpio-cfg = <0x3 0x0 0x0 0x0 0x0 0x0 0x0 0x8000 0x0 0x0 0x0>;
+		
+		wlf,lineout1-feedback;
+		wlf,lineout1-se;
+		wlf,lineout2-se;
+		
+		wlf,ldo1ena-gpios = <&gpm4 4 GPIO_ACTIVE_HIGH>;
+		wlf,ldoena-always-driven;
+	};
+};
+
+&i2c_5 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	status = "okay";
+};
+
+
+&i2c_6 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	status = "okay";
+};
+
 &i2c_7 {
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <100000>;
-	pinctrl-0 = <&i2c7_bus>;
-	pinctrl-names = "default";
 	status = "okay";
 
 	max77686: max77686_pmic@9 {
@@ -688,7 +816,7 @@
 		reg = <1>;
 		compatible = "brcm,bcm4329-fmac";
 		interrupt-parent = <&gpx2>;
-		interrupts = <5 IRQ_TYPE_NONE>;
+		interrupts = <5 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "host-wake";
 	};
 };
@@ -709,20 +837,27 @@
 	cap-sd-highspeed;
 };
 
-&pmu_system_controller {
-	assigned-clocks = <&pmu_system_controller 0>;
-	assigned-clock-parents =  <&clock CLK_XUSBXTI>;
-};
-
 &pinctrl_0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep0>;
+	pinctrl-0 = <&sleep0 &ear_mic_bias &lineout_en>;
 
 	tsp_ldo_init: tsp-ldo-init {
 		samsung,pins = "gpb-5", "gpb-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-val = <1>;
+	};
+
+	ear_mic_bias: ear-mic-bias {
+		samsung,pins = "gpj0-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	lineout_en: lineout-en {
+		samsung,pins = "gpj1-2";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
 	sleep0: sleep-states {
@@ -825,7 +960,7 @@
 
 &pinctrl_1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep1 &uart_sel &usb_30pin_irq_init &usb_otg_en>;
+	pinctrl-0 = <&sleep1 &uart_sel &usb_30pin_irq_init &usb_otg_en &main_mic_bias>;
 
 	uart_sel: uart-sel {
 		samsung,pins = "gpl2-7";
@@ -904,6 +1039,12 @@
 	charger_change: charger-change {
 		samsung,pins = "gpm0-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	main_mic_bias: main-mic-bias {
+		samsung,pins = "gpm0-0";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
@@ -1134,6 +1275,14 @@
 
 &serial_0 {
 	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm43438-bt";
+		shutdown-gpios = <&gpl0 6 GPIO_ACTIVE_HIGH>;
+		device-wakeup-gpios = <&gpx3 1 GPIO_ACTIVE_HIGH>;
+		host-wakeup-gpios = <&gpx2 6 GPIO_ACTIVE_HIGH>;
+		clocks = <&max77686 MAX77686_CLK_PMIC>;
+	};
 };
 
 &serial_1 {

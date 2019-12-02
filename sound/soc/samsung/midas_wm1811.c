@@ -188,6 +188,9 @@ static int midas_mic_bias(struct snd_soc_dapm_widget *w,
 	struct snd_soc_card *card = w->dapm->card;
 	struct midas_machine_priv *priv = snd_soc_card_get_drvdata(card);
 
+	if (!priv->reg_mic_bias)
+		return 0;
+
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
 		return regulator_enable(priv->reg_mic_bias);
@@ -203,6 +206,9 @@ static int midas_submic_bias(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_card *card = w->dapm->card;
 	struct midas_machine_priv *priv = snd_soc_card_get_drvdata(card);
+
+	if (!priv->reg_submic_bias)
+		return 0;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
