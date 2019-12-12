@@ -85,21 +85,21 @@
 	tsp_ldo_on: voltage-regulator-1 {
 		compatible = "regulator-fixed";
 		regulator-name = "TSP_LDO_ON";
-		gpio = <&gpm4 5 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpm4 5 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
 
 	tsp_ldo_on1: voltage-regulator-2 {
 		compatible = "regulator-fixed";
 		regulator-name = "TSP_LDO_ON1";
-		gpio = <&gpb 5 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpb 5 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
 
 	tsp_ldo_on2: voltage-regulator-3 {
 		compatible = "regulator-fixed";
 		regulator-name = "TSP_LDO_ON2";
-		gpio = <&gpb 7 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpb 7 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
 
@@ -116,7 +116,7 @@
 		regulator-name = "MICBIAS_LDO_2.8V";
 		regulator-min-microvolt = <2800000>;
 		regulator-max-microvolt = <2800000>;
-		gpio = <&gpm0 0 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpm0 0 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
 
@@ -137,9 +137,12 @@
 
 	i2c_sensors: i2c@9 {
 		compatible = "i2c-gpio";
-		gpios = <&gpl0 2 GPIO_ACTIVE_HIGH>,
-				<&gpl0 1 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpl0 2 (GPIO_ACTIVE_LOW|GPIO_OPEN_DRAIN)>;
+		scl-gpios =	<&gpl0 1 (GPIO_ACTIVE_LOW|GPIO_OPEN_DRAIN)>;
 		
+		pinctrl-names = "default";
+		pinctrl-0 = <&sensor_init>;
+
 		i2c-gpio,delay-us = <2>;
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -150,24 +153,26 @@
 			reg = <0x23>;
 		};
 
+		/*
 		al3201: light-sensor@1c {
 			// to be ported
 		};
+		*/
 	};
 
 	i2c_ak8975: i2c@10 {
 		compatible = "i2c-gpio";
-		gpios = <&gpy2 4 GPIO_ACTIVE_HIGH>,
-				<&gpy2 5 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpy2 4 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpy2 5 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
 		
 		i2c-gpio,delay-us = <2>;
 		#address-cells = <1>;
 		#size-cells = <0>;
 		status = "okay";
 
-		ak8975: magnetometer@C {
+		ak8975: magnetometer@c {
 			compatible = "asahi-kasei,ak8975";
-			reg = <0x0C>;
+			reg = <0x0c>;
 			interrupt-parent = <&gpm4>;
 			interrupts = <7 IRQ_TYPE_EDGE_RISING>;
 			pinctrl-names = "default";
@@ -175,10 +180,11 @@
 		};
 	};
 
+	/*
 	i2c_smb347: i2c@13 {
 		compatible = "i2c-gpio";
-		gpios = <&gpm2 0 GPIO_ACTIVE_HIGH>,
-				<&gpm2 1 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpm2 0 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpm2 1 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
 
 		i2c-gpio,delay-us = <2>;
 		#address-cells = <1>;
@@ -187,7 +193,6 @@
 
 		smb347: charger@6 {
 			// need to add CONFIG_OF to driver
-			/*
 			compatible = "sme,smb347";
 			reg = <0x6>;
 			pinctrl-names = "default";
@@ -195,14 +200,15 @@
 			gpios = <&gpm4 2 GPIO_ACTIVE_HIGH>, // enable
 					<&gpm0 3 GPIO_ACTIVE_HIGH>, // stat
 					<&gpx1 4 GPIO_ACTIVE_HIGH>; // ta_nconnected
-			*/
+			
 		};
 	};
+	*/
 
 	i2c_max17042: i2c@14 {
 		compatible = "i2c-gpio";
-		gpios = <&gpy0 2 GPIO_ACTIVE_HIGH>,
-				<&gpy0 3 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpy0 2 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpy0 3 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
 		
 		i2c-gpio,delay-us = <2>;
 		#address-cells = <1>;
@@ -220,10 +226,11 @@
 		};
 	};
 
+	/* 
 	i2c_isa1200: i2c@17 {
 		compatible = "i2c-gpio";
-		gpios = <&gpm1 0 GPIO_ACTIVE_HIGH>,
-				<&gpm1 1 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpm1 0 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpm1 1 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
 		
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -233,11 +240,12 @@
 			// to be ported
 		};
 	};
+	 */
 
 	i2c_stmpe_adc: i2c@19 {	
 		compatible = "i2c-gpio";
-		gpios = <&gpm4 1 GPIO_ACTIVE_HIGH>,
-				<&gpm4 0 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpm4 1 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpm4 0 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
 
 		i2c-gpio,delay-us = <5>;
 		#address-cells = <1>;
@@ -247,10 +255,9 @@
 		stmpe_adc: mfd-adc@41 {
 			compatible = "st,stmpe811";
 			reg = <0x41>;
-			interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+			interrupts = <1 IRQ_TYPE_LEVEL_LOW>;
 			interrupt-parent = <&gpx0>;
 			interrupt-controller;
-			blocks = <0x5>;
 			irq-trigger = <0x1>;
 			// Common ADC settings
 			// 6.5 MHz ADC clock speed, not 1.625 as mentioned in the original kernel sources!
@@ -271,10 +278,11 @@
 		};
 	};
 
+	/* 
 	i2c_mc96: i2c@22 {
 		compatible = "i2c-gpio";
-		gpios = <&gpy0 0 GPIO_ACTIVE_HIGH>,
-				<&gpy0 1 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpy0 0 GPIO_ACTIVE_LOW>;
+		scl-gpios = <&gpy0 1 GPIO_ACTIVE_LOW>;
 		
 		i2c-gpio,delay-us = <2>;
 		#address-cells = <1>;
@@ -285,6 +293,7 @@
 			// to be ported
 		};
 	};
+	*/
 
 	wm1811_n8000: sound {
 		compatible = "samsung,midas-audio";
@@ -1111,6 +1120,12 @@
 	ak8975_interrupt: ak8975-interrupt {
 		samsung,pins = "gpm4-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+	};
+
+	sensor_init: sensor-init {
+		samsung,pins = "gpl0-2", "gpl0-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
 	};
 
