@@ -85,21 +85,38 @@
 	tsp_ldo_on: voltage-regulator-1 {
 		compatible = "regulator-fixed";
 		regulator-name = "TSP_LDO_ON";
-		gpio = <&gpm4 5 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpm4 5 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
 
 	tsp_ldo_on1: voltage-regulator-2 {
 		compatible = "regulator-fixed";
 		regulator-name = "TSP_LDO_ON1";
-		gpio = <&gpb 5 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpb 5 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
 
 	tsp_ldo_on2: voltage-regulator-3 {
 		compatible = "regulator-fixed";
 		regulator-name = "TSP_LDO_ON2";
-		gpio = <&gpb 7 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpb 7 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	wm1811_spkvdd: fixed-regulator-spkvdd {
+		compatible = "regulator-fixed";
+		regulator-name = "VBATT";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	mic_bias_reg: mic-bias-reg {
+		compatible = "regulator-fixed";
+		regulator-name = "MICBIAS_LDO_2.8V";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		gpios = <&gpm0 0 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
 
@@ -118,23 +135,129 @@
 		power-domains = <&pd_lcd0>;
 	};
 
+	i2c_sensors: i2c@9 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpl0 2 (GPIO_ACTIVE_LOW|GPIO_OPEN_DRAIN)>;
+		scl-gpios =	<&gpl0 1 (GPIO_ACTIVE_LOW|GPIO_OPEN_DRAIN)>;
+		
+		pinctrl-names = "default";
+		pinctrl-0 = <&sensor_init>;
+
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		bh1721fvc: light-sensor@23 {
+			compatible = "rohm,bh1721";
+			reg = <0x23>;
+		};
+
+		/*
+		al3201: light-sensor@1c {
+			// to be ported
+		};
+		*/
+	};
+
+	i2c_ak8975: i2c@10 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpy2 4 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpy2 5 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		ak8975: magnetometer@c {
+			compatible = "asahi-kasei,ak8975";
+			reg = <0x0c>;
+			interrupt-parent = <&gpm4>;
+			interrupts = <7 IRQ_TYPE_EDGE_RISING>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&ak8975_interrupt>;
+		};
+	};
+
+	/*
+	i2c_smb347: i2c@13 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpm2 0 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpm2 1 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		smb347: charger@6 {
+			// need to add CONFIG_OF to driver
+			compatible = "sme,smb347";
+			reg = <0x6>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&charger_change>;
+			gpios = <&gpm4 2 GPIO_ACTIVE_HIGH>, // enable
+					<&gpm0 3 GPIO_ACTIVE_HIGH>, // stat
+					<&gpx1 4 GPIO_ACTIVE_HIGH>; // ta_nconnected
+			
+		};
+	};
+	*/
+
+	i2c_max17042: i2c@14 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpy0 2 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpy0 3 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		max17042: battery@36 {
+			compatible = "maxim,max17042";
+			reg = <0x36>;
+			interrupts = <3 IRQ_TYPE_EDGE_FALLING>;
+			interrupt-parent = <&gpx2>;
+			maxim,rsns-microohm = <10000>;
+			maxim,over-heat-temp = <600>;
+			maxim,over-volt = <4300>;
+		};
+	};
+
+	/* 
+	i2c_isa1200: i2c@17 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpm1 0 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpm1 1 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		isa1200: motor@48 {
+			// to be ported
+		};
+	};
+	 */
+
 	i2c_stmpe_adc: i2c@19 {	
 		compatible = "i2c-gpio";
-		sda-gpios = <&gpm4 1 GPIO_ACTIVE_HIGH>;
-		scl-gpios = <&gpm4 0 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpm4 1 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpm4 0 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
 
 		i2c-gpio,delay-us = <5>;
 		#address-cells = <1>;
 		#size-cells = <0>;
 		status = "okay";
 
-		stmpe811adc@41 {
+		stmpe_adc: mfd-adc@41 {
 			compatible = "st,stmpe811";
 			reg = <0x41>;
-			interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+			interrupts = <1 IRQ_TYPE_LEVEL_LOW>;
 			interrupt-parent = <&gpx0>;
 			interrupt-controller;
-			blocks = <0x5>;
 			irq-trigger = <0x1>;
 			// Common ADC settings
 			// 6.5 MHz ADC clock speed, not 1.625 as mentioned in the original kernel sources!
@@ -153,67 +276,68 @@
 				st,norequest-mask = <0x2F>;
 			};
 		};
-
 	};
 
-	i2c_ak8975: i2c@10 {
+	/* 
+	i2c_mc96: i2c@22 {
 		compatible = "i2c-gpio";
-		gpios = <&gpy2 4 GPIO_ACTIVE_HIGH>, <&gpy2 5 GPIO_ACTIVE_HIGH>;
+		sda-gpios = <&gpy0 0 GPIO_ACTIVE_LOW>;
+		scl-gpios = <&gpy0 1 GPIO_ACTIVE_LOW>;
 		
 		i2c-gpio,delay-us = <2>;
 		#address-cells = <1>;
 		#size-cells = <0>;
 		status = "okay";
 
-		ak8975@c {
-			compatible = "asahi-kasei,ak8975";
-			reg = <0x0c>;
-			gpios = <&gpm4 7 GPIO_ACTIVE_HIGH>;
+		mc96: irled@50 {
+			// to be ported
 		};
 	};
+	*/
 
-	/* i2c_smb347: i2c@13 {
-		compatible = "i2c-gpio";
-		gpios = <&gpm2 0 GPIO_ACTIVE_HIGH>,
-				<&gpm2 1 GPIO_ACTIVE_HIGH>;
+	/*
+	wm1811_n8000: sound {
+		compatible = "samsung,midas-audio";
+		model = "WM1811 @ N8000";
+		mic-bias-supply = <&mic_bias_reg>;
+		lineout-sel-gpios = <&gpj1 2 GPIO_ACTIVE_HIGH>;
+		i2s-controller = <&i2s0>;
+		audio-codec = <&wm1811>;
+		samsung,audio-routing =
+			"HP", "HPOUT1L",
+			"HP", "HPOUT1R",
 
-		i2c-gpio,delay-us = <2>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-		status = "okay";
+			"SPK", "SPKOUTLN",
+			"SPK", "SPKOUTLP",
+			"SPK", "SPKOUTRN",
+			"SPK", "SPKOUTRP",
 
-		smb347@6 {
-			compatible = "sme,smb347";
-			reg = <0x6>;
-			pinctrl-names = "default";
-			pinctrl-0 = <&charger_change>;
-			gpios = <&gpm4 2 GPIO_ACTIVE_HIGH>, // enable
-					<&gpm0 3 GPIO_ACTIVE_HIGH>, // stat
-					<&gpx1 4 GPIO_ACTIVE_HIGH>; // ta_nconnected
-		};
-	}; */
+			"RCV", "HPOUT2N",
+			"RCV", "HPOUT2P",
 
-	i2c_max14072: i2c@14 {
-		compatible = "i2c-gpio";
-		gpios = <&gpy0 2 GPIO_ACTIVE_HIGH>,
-				<&gpy0 3 GPIO_ACTIVE_HIGH>;
-		
-		i2c-gpio,delay-us = <2>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-		status = "okay";
+			"LINE", "LINEOUT2N",
+			"LINE", "LINEOUT2P",
 
-		max17042@36 {
-			compatible = "maxim,max17042";
-			reg = <0x36>;
-			interrupts = <3 IRQ_TYPE_EDGE_FALLING>;
-			interrupt-parent = <&gpx2>;
-			maxim,rsns-microohm = <10000>;
-			maxim,over-heat-temp = <600>;
-			maxim,over-volt = <4300>;
-		};
+			"HDMI", "LINEOUT1N",
+			"HDMI", "LINEOUT1P",
+
+			"IN1LP", "MICBIAS1",
+			"IN1LN", "MICBIAS1",
+			"MICBIAS1", "Main Mic",
+
+			"IN1RP", "Sub Mic",
+			"IN1RN", "Sub Mic",
+
+			"IN2LP:VXRN", "MICBIAS2",
+			"MICBIAS2", "Headset Mic",
+
+			"IN2RN", "FM In",
+			"IN2RP:VXRP", "FM In",
+
+			"IN2RN", "Third Mic",
+			"IN2RP:VXRP", "Third Mic";
 	};
-
+	*/
 
 };
 
@@ -355,6 +479,13 @@
 	status = "okay";
 };
 
+&pmu_system_controller {
+	compatible = "samsung,exynos4210-pmu", "syscon", "simple-mfd";
+	assigned-clocks = <&pmu_system_controller 0>;
+	assigned-clock-parents =  <&clock CLK_XUSBXTI>;
+};
+
+
 &fimd {
 	pinctrl-0 = <&lcd_clk &lcd_data24 &pwm1_out>;
 	pinctrl-names = "default";
@@ -378,12 +509,25 @@
 	};
 };
 
-&i2c_3 {
+&i2c_0 {
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <400000>;
-	pinctrl-0 = <&i2c3_bus>;
-	pinctrl-names = "default";
+	status = "okay";
+};
+
+&i2c_1 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	status = "okay";
+};
+
+&i2c_3 {
+	// touchscreen
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
 	status = "okay";
 
 	touchscreen@4a {
@@ -399,12 +543,67 @@
 	};
 };
 
-&i2c_7 {
+&i2c_4 {
+	// audio
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <100000>;
-	pinctrl-0 = <&i2c7_bus>;
-	pinctrl-names = "default";
+	status = "okay";
+
+	wm1811: wm1811@1a {
+		compatible = "wlf,wm1811";
+		reg = <0x1a>;
+		
+		clocks = <&pmu_system_controller 0>,
+				<&max77686 MAX77686_CLK_PMIC>;
+		clock-names = "MCLK1", "MCLK2";
+		
+		gpio-controller;
+		#gpio-cells = <2>;
+
+		AVDD2-supply = <&wm1811_spkvdd>;
+		DCVDD-supply = <&ldo3_reg>;
+		CPVDD-supply = <&wm1811_spkvdd>;
+		DBVDD1-supply = <&ldo3_reg>;
+		DBVDD2-supply = <&wm1811_spkvdd>;
+		DBVDD3-supply = <&wm1811_spkvdd>;
+		SPKVDD1-supply = <&wm1811_spkvdd>;
+		SPKVDD2-supply = <&wm1811_spkvdd>;
+		
+		wlf,micbias-cfg = <0x2F 0x27>;
+		wlf,gpio-cfg = <0x3 0x0 0x0 0x0 0x0 0x0 0x0 0x8000 0x0 0x0 0x0>;
+		
+		wlf,lineout1-feedback;
+		wlf,lineout1-se;
+		wlf,lineout2-se;
+		
+		wlf,ldo1ena-gpios = <&gpm4 4 GPIO_ACTIVE_HIGH>;
+		wlf,ldoena-always-driven;
+	};
+};
+
+&i2c_5 {
+	// this should be max77686 but hangs if moved over here
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	status = "okay";
+};
+
+
+&i2c_6 {
+	// wacom pen
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	status = "okay";
+};
+
+&i2c_7 {
+	// it looks like a max77686, it moves like a max77686 but this shouldn't be a max77686
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <100000>;
 	status = "okay";
 
 	max77686: max77686_pmic@9 {
@@ -688,7 +887,7 @@
 		reg = <1>;
 		compatible = "brcm,bcm4329-fmac";
 		interrupt-parent = <&gpx2>;
-		interrupts = <5 IRQ_TYPE_NONE>;
+		interrupts = <5 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "host-wake";
 	};
 };
@@ -709,20 +908,27 @@
 	cap-sd-highspeed;
 };
 
-&pmu_system_controller {
-	assigned-clocks = <&pmu_system_controller 0>;
-	assigned-clock-parents =  <&clock CLK_XUSBXTI>;
-};
-
 &pinctrl_0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep0>;
+	pinctrl-0 = <&sleep0 &ear_mic_bias &lineout_en>;
 
 	tsp_ldo_init: tsp-ldo-init {
 		samsung,pins = "gpb-5", "gpb-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-val = <1>;
+	};
+
+	ear_mic_bias: ear-mic-bias {
+		samsung,pins = "gpj0-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	lineout_en: lineout-en {
+		samsung,pins = "gpj1-2";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
 	sleep0: sleep-states {
@@ -825,7 +1031,7 @@
 
 &pinctrl_1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep1 &uart_sel &usb_30pin_irq_init &usb_otg_en>;
+	pinctrl-0 = <&sleep1 &uart_sel &usb_30pin_irq_init &usb_otg_en &main_mic_bias>;
 
 	uart_sel: uart-sel {
 		samsung,pins = "gpl2-7";
@@ -905,6 +1111,24 @@
 		samsung,pins = "gpm0-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	main_mic_bias: main-mic-bias {
+		samsung,pins = "gpm0-0";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	ak8975_interrupt: ak8975-interrupt {
+		samsung,pins = "gpm4-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+	};
+
+	sensor_init: sensor-init {
+		samsung,pins = "gpl0-2", "gpl0-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
 	};
 
 	sleep1: sleep-states {
@@ -1134,6 +1358,14 @@
 
 &serial_0 {
 	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm43438-bt";
+		shutdown-gpios = <&gpl0 6 GPIO_ACTIVE_HIGH>;
+		device-wakeup-gpios = <&gpx3 1 GPIO_ACTIVE_HIGH>;
+		host-wakeup-gpios = <&gpx2 6 GPIO_ACTIVE_HIGH>;
+		clocks = <&max77686 MAX77686_CLK_PMIC>;
+	};
 };
 
 &serial_1 {
