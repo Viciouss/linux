@@ -32,7 +32,7 @@
 	};
 
 	chosen {
-		bootargs = "root=/dev/mmcblk2p9 rw earlyprintk init=/init androidboot.selinux=permissive androidboot.console=ttySAC2";
+		bootargs = "root=/dev/mmcblk2p9 rw ignore_loglevel earlyprintk init=/init androidboot.selinux=permissive androidboot.console=ttySAC2 androidboot.hardware=smdk4x12";
 		stdout-path = "serial2:115200n8";
 	};
 
@@ -313,27 +313,27 @@
 			"RCV", "HPOUT2N",
 			"RCV", "HPOUT2P",
 
-			"LINE", "LINEOUT2N",
-			"LINE", "LINEOUT2P",
+			/*"LINE", "LINEOUT2N",
+			"LINE", "LINEOUT2P", */
 
 			"HDMI", "LINEOUT1N",
 			"HDMI", "LINEOUT1P",
 
 			"IN1LP", "MICBIAS1",
 			"IN1LN", "MICBIAS1",
-			"MICBIAS1", "Main Mic",
+			/*"MICBIAS1", "Main Mic",*/
 
 			"IN1RP", "Sub Mic",
-			"IN1RN", "Sub Mic",
+			"IN1RN", "Sub Mic";
 
-			"IN2LP:VXRN", "MICBIAS2",
+			/*"IN2LP:VXRN", "MICBIAS2",
 			"MICBIAS2", "Headset Mic",
 
 			"IN2RN", "FM In",
 			"IN2RP:VXRP", "FM In",
 
 			"IN2RN", "Third Mic",
-			"IN2RP:VXRP", "Third Mic";
+			"IN2RP:VXRP", "Third Mic";*/
 	};
 
 };
