@@ -134,6 +134,18 @@
 		power-domains = <&pd_lcd0>;
 	};
 
+	lcd_display: s6c1372 {
+		compatible = "samsung,s6c1372";
+		gpios = <&gpm0 1 GPIO_ACTIVE_HIGH
+					&gpm0 5 GPIO_ACTIVE_HIGH>;
+
+		port {
+			lcd_ep: endpoint {
+				remote-endpoint = <&fimd_ep>;
+			};
+		};
+	};
+
 	i2c_sensors: i2c@9 {
 		compatible = "i2c-gpio";
 		sda-gpios = <&gpl0 2 (GPIO_ACTIVE_LOW|GPIO_OPEN_DRAIN)>;
@@ -527,6 +539,11 @@
 			vfront-porch = <4>;
 			vsync-len = <3>;
 			hsync-active = <1>;
+		};
+	};
+	port@3 {
+		fimd_ep: endpoint {
+			remote-endpoint = <&lcd_ep>;
 		};
 	};
 };

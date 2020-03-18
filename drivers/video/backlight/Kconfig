@@ -84,6 +84,12 @@ config LCD_VGG2432A4
 	  If you have a VGG2432A4 panel based on the ILI9320 controller chip
 	  then say y to include a power driver for it.
 
+config LCD_S6C1372
+    tristate "Samsung S6C1372 LCD Panel support"
+	depends on SPI_MASTER
+	help
+	  If you have a Samsung S6C1372 panel, then say y to include the driver.
+
 config LCD_PLATFORM
 	tristate "Platform LCD controls"
 	help
