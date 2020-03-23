@@ -15,6 +15,7 @@
 
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/gpio-keys.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/clock/maxim,max77686.h>
 #include <dt-bindings/pinctrl/samsung.h>
@@ -32,7 +33,7 @@
 	};
 
 	chosen {
-		bootargs = "root=/dev/mmcblk2p9 rw ignore_loglevel earlyprintk init=/init androidboot.selinux=permissive androidboot.console=ttySAC2 androidboot.hardware=smdk4x12";
+		bootargs = "root=/dev/mmcblk2p9 rw ignore_loglevel earlyprintk init=/init androidboot.selinux=permissive androidboot.console=ttySAC2 androidboot.hardware=smdk4x12 no_console_suspend";
 		stdout-path = "serial2:115200n8";
 	};
 
@@ -266,8 +267,8 @@
 		stmpe_adc: mfd-adc@41 {
 			compatible = "st,stmpe811";
 			reg = <0x41>;
-			interrupts = <1 IRQ_TYPE_LEVEL_LOW>;
 			interrupt-parent = <&gpx0>;
+			interrupts = <1 IRQ_TYPE_LEVEL_LOW>;
 			interrupt-controller;
 			irq-trigger = <0x1>;
 			// Common ADC settings
@@ -346,6 +347,25 @@
 
 			"IN2RN", "Third Mic",
 			"IN2RP:VXRP", "Third Mic";*/
+	};
+
+	thermal-zones {
+		cpu_thermal: cpu-thermal {
+			cooling-maps {
+				map0 {
+					/* Corresponds to 800MHz at freq_table */
+					cooling-device = <&cpu0 7 7>, <&cpu1 7 7>,
+						      <&cpu2 7 7>, <&cpu3 7 7>;
+				};
+				map1 {
+					/* Corresponds to 200MHz at freq_table */
+					cooling-device = <&cpu0 13 13>,
+							<&cpu1 13 13>,
+							<&cpu2 13 13>,
+						<&cpu3 13 13>;
+				};
+			};
+		};
 	};
 
 };
@@ -552,6 +572,8 @@
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c1_bus>;
+	pinctrl-names = "default";
 	status = "okay";
 };
 
@@ -559,6 +581,8 @@
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c2_bus>;
+	pinctrl-names = "default";
 	status = "okay";
 };
 
@@ -567,6 +591,8 @@
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c3_bus>;
+	pinctrl-names = "default";
 	status = "okay";
 
 	touchscreen@4a {
@@ -628,6 +654,8 @@
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c5_bus>;
+	pinctrl-names = "default";
 	status = "okay";
 };
 
@@ -637,6 +665,8 @@
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
 	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c6_bus>;
+	pinctrl-names = "default";
 	status = "okay";
 };
 
@@ -644,7 +674,9 @@
 	// it looks like a max77686, it moves like a max77686 but this shouldn't be a max77686
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
-	samsung,i2c-max-bus-freq = <100000>;
+	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c7_bus>;
+	pinctrl-names = "default";
 	status = "okay";
 
 	max77686: max77686_pmic@9 {
@@ -794,7 +826,7 @@
 				};
 			};
 
-			// ?
+			// ? vdd_adc_3.3v
 			ldo23_reg: LDO23 {
 				regulator-name = "VDD_ADC_3.3V";
 				regulator-min-microvolt = <3300000>;
@@ -1074,7 +1106,7 @@
 
 &pinctrl_1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep1 &uart_sel &usb_30pin_irq_init &usb_otg_en &main_mic_bias>;
+	pinctrl-0 = <&sleep1 &uart_sel &usb_acc_en &usb_acc_5v &usb_30pin_irq_init &main_mic_bias>;
 
 	uart_sel: uart-sel {
 		samsung,pins = "gpl2-7";
@@ -1084,12 +1116,20 @@
 		samsung,pin-val = <1>;
 	};
 
-	usb_otg_en: usb-otg-en {
+	usb_acc_en: usb-acc-en {
 		samsung,pins = "gpl2-6";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
-		samsung,pin-val = <0>;
+		samsung,pin-val = <1>;
+	};
+
+	usb_acc_5v: usb-acc-5v {
+		samsung,pins = "gpx3-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+		samsung,pin-val = <1>;
 	};
 
 	usb_30pin_irq_init: usb-30pin-irq-init {
@@ -1100,7 +1140,9 @@
 
 	gpio_keys: gpio-keys {
 		samsung,pins = "gpx2-2", "gpx2-7", "gpx3-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
 	};
 
 	wifi_host_wake: wifi-host-wake {
@@ -1420,5 +1462,10 @@
 };
 
 &serial_3 {
+	status = "okay";
+};
+
+&tmu {
+	vtmu-supply = <&ldo10_reg>;
 	status = "okay";
 };
