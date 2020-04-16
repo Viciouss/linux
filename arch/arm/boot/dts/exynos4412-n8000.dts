@@ -319,6 +319,13 @@
 	*/
 
 	wm1811_n8000: sound {
+		compatible = "samsung,smdk-wm8994";
+
+		samsung,i2s-controller = <&i2s0>;
+		samsung,audio-codec = <&wm1811>;
+	};
+
+	/*wm1811_n8000: sound {
 		compatible = "samsung,midas-audio";
 		model = "WM1811 @ N8000";
 		mic-bias-supply = <&mic_bias_reg>;
@@ -337,28 +344,28 @@
 			"RCV", "HPOUT2N",
 			"RCV", "HPOUT2P",
 
-			/*"LINE", "LINEOUT2N",
-			"LINE", "LINEOUT2P", */
+			//"LINE", "LINEOUT2N",
+			//"LINE", "LINEOUT2P",
 
 			"HDMI", "LINEOUT1N",
 			"HDMI", "LINEOUT1P",
 
 			"IN1LP", "MICBIAS1",
 			"IN1LN", "MICBIAS1",
-			/*"MICBIAS1", "Main Mic",*/
+			//"MICBIAS1", "Main Mic",
 
 			"IN1RP", "Sub Mic",
 			"IN1RN", "Sub Mic";
 
-			/*"IN2LP:VXRN", "MICBIAS2",
-			"MICBIAS2", "Headset Mic",
+			//"IN2LP:VXRN", "MICBIAS2",
+			//"MICBIAS2", "Headset Mic",
 
-			"IN2RN", "FM In",
-			"IN2RP:VXRP", "FM In",
+			//"IN2RN", "FM In",
+			//"IN2RP:VXRP", "FM In",
 
-			"IN2RN", "Third Mic",
-			"IN2RP:VXRP", "Third Mic";*/
-	};
+			//"IN2RN", "Third Mic",
+			//"IN2RP:VXRP", "Third Mic";
+	};*/
 
 	thermal-zones {
 		cpu_thermal: cpu-thermal {
