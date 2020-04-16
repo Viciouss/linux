@@ -61,23 +61,24 @@
 
 		key-down {
 			gpios = <&gpx2 2 GPIO_ACTIVE_LOW>;
-			linux,code = <114>;
+			linux,code = <KEY_VOLUMEDOWN>;
 			label = "volume down";
 			debounce-interval = <10>;
 		};
 
 		key-up {
 			gpios = <&gpx3 3 GPIO_ACTIVE_LOW>;
-			linux,code = <115>;
+			linux,code = <KEY_VOLUMEUP>;
 			label = "volume up";
 			debounce-interval = <10>;
 		};
 
 		key-power {
 			gpios = <&gpx2 7 GPIO_ACTIVE_LOW>;
-			linux,code = <116>;
+			linux,code = <KEY_POWER>;
 			label = "power";
 			debounce-interval = <10>;
+			linux,can-disable;
 			wakeup-source;
 		};
 	};
@@ -117,6 +118,16 @@
 		regulator-min-microvolt = <2800000>;
 		regulator-max-microvolt = <2800000>;
 		gpios = <&gpm0 0 GPIO_ACTIVE_HIGH>;
+	};
+
+	gpio_usb_sel_cp: voltage-regulator-4 {
+		compatible = "regulator-fixed";
+		regulator-name = "GPIO_USB_SEL_CP";
+		regulator-min-microvolt = <2000000>;
+		regulator-max-microvolt = <2000000>;
+		gpios = <&gpm0 7 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usb_cp>;
 		enable-active-high;
 	};
 
@@ -427,24 +438,28 @@
 };
 
 &exynos_usbphy {
+	vbus-supply = <&gpio_usb_sel_cp>;
 	status = "okay";
 };
 
 &ehci {
 	status = "okay";
+	port@0 {
+		status = "okay";
+		phy-names = "host";
+	};
 	port@1 {
 		status = "okay";
+		phy-names = "hsic0";
 	};
 	port@2 {
 		status = "okay";
+		phy-names = "hsic1";
 	};
 };
 
 &ohci {
 	status = "okay";
-	port@0 {
-		status = "okay";
-	};
 };
 
 &hsotg {
@@ -524,7 +539,7 @@
 };
 
 &pmu_system_controller {
-	compatible = "samsung,exynos4210-pmu", "syscon", "simple-mfd";
+	compatible = "samsung,exynos4412-pmu", "syscon", "simple-mfd";
 	assigned-clocks = <&pmu_system_controller 0>;
 	assigned-clock-parents =  <&clock CLK_XUSBXTI>;
 
@@ -1106,13 +1121,30 @@
 
 &pinctrl_1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep1 &uart_sel &usb_acc_en &usb_acc_5v &usb_30pin_irq_init &main_mic_bias>;
+	pinctrl-0 = <&sleep1 &uart_sel &usb_acc_en &usb_acc_5v &main_mic_bias>;
+
+	usb_sel1: usb-sel0 {
+		samsung,pins = "gpy0-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	usb_sel2: usb-sel1 {
+		samsung,pins = "gpy0-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	usb_cp: usb-cp {
+		samsung,pins = "gpm0-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
 
 	uart_sel: uart-sel {
 		samsung,pins = "gpl2-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
-		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
 		samsung,pin-val = <1>;
 	};
 
@@ -1121,7 +1153,6 @@
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
-		samsung,pin-val = <1>;
 	};
 
 	usb_acc_5v: usb-acc-5v {
@@ -1129,20 +1160,32 @@
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
-		samsung,pin-val = <1>;
 	};
 
-	usb_30pin_irq_init: usb-30pin-irq-init {
-		samsung,pins = "gpx0-4", "gpx1-3";
+	accessory_int: accessory-int {
+		samsung,pins = "gpx0-4";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	ta_connected_int: ta-connected {
+		samsung,pins = "gpx1-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	dock_int: dock-int {
+		samsung,pins = "gpx1-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
 	};
 
 	gpio_keys: gpio-keys {
 		samsung,pins = "gpx2-2", "gpx2-7", "gpx3-3";
-		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
-		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
 	};
 
 	wifi_host_wake: wifi-host-wake {
@@ -1176,7 +1219,7 @@
 	tsp_int: tsp-int {
 		samsung,pins = "gpm2-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
-		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
 	};
 
 	wifi_on: wifi-on {
