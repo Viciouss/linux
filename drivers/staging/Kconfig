@@ -123,4 +123,6 @@ source "drivers/staging/hp/Kconfig"
 
 source "drivers/staging/wfx/Kconfig"
 
+source "drivers/staging/p4note/Kconfig"
+
 endif # STAGING

@@ -52,3 +52,4 @@ obj-$(CONFIG_STAGING_EXFAT_FS)	+= exfat/
 obj-$(CONFIG_QLGE)		+= qlge/
 obj-$(CONFIG_NET_VENDOR_HP)	+= hp/
 obj-$(CONFIG_WFX)		+= wfx/
+obj-$(CONFIG_P4NOTE)	+= p4note/
