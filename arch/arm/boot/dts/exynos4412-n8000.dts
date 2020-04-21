@@ -158,6 +158,17 @@
 		};
 	};
 
+	irq_fun: irq-fun {
+		compatible = "p4note,irq-test";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&accessory_int &dock_int &ta_connected_int>;
+
+		acc-gpios = <&gpx0 4 GPIO_ACTIVE_LOW>;
+		dock-gpios = <&gpx1 3 GPIO_ACTIVE_LOW>;
+		charger-gpios = <&gpx1 4 GPIO_ACTIVE_LOW>;
+	};
+
 	i2c_sensors: i2c@9 {
 		compatible = "i2c-gpio";
 		sda-gpios = <&gpl0 2 (GPIO_ACTIVE_LOW|GPIO_OPEN_DRAIN)>;

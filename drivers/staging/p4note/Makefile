@@ -10,4 +10,4 @@ obj-$(CONFIG_SEC_P4NOTE_CHARGING) += sec_battery_px.o
 
 obj-$(CONFIG_SEC_P4NOTE_KEYBOARD) += sec_keyboard.o
 
-obj-$(CONFIG_P4NOTE) = irq_fun.o
+obj-$(CONFIG_P4NOTE_IRQ_FUN) = irq_fun.o

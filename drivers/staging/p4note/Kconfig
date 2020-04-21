@@ -3,6 +3,11 @@
 config P4NOTE
 	tristate "P4NOTE: Samsung Galaxy Note 10.1 drivers"
 
+config P4NOTE_IRQ_FUN
+	tristate "P4NOTE: irq experiments"
+	help
+		This will activate the irq experiment module.
+
 config SEC_P4NOTE_SWITCH
 	tristate "P4NOTE: legacy usb switch driver"
 	help
