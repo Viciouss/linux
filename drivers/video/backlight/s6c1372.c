@@ -107,12 +107,11 @@ static int s6c1372_probe(struct platform_device *pdev)
 		if (IS_ERR(lcd))
 			return PTR_ERR(lcd);
 
-	lcd->ld = lcd_device_register("panel", &pdev->dev, lcd, &s6c1372_ops);
+	lcd->ld = devm_lcd_device_register(dev, "panel", &pdev->dev, lcd, &s6c1372_ops);
 
 	if (IS_ERR(lcd->ld)) {
 		pr_err("failed to register lcd device\n");
-		ret = PTR_ERR(lcd->ld);
-		goto out_free_lcd;
+		return PTR_ERR(lcd->ld);
 	}
 
 	lcd->power = 1;
@@ -122,10 +121,6 @@ static int s6c1372_probe(struct platform_device *pdev)
 	dev_info(&lcd->ld->dev, "lcd panel driver has been probed.\n");
 
 	return  0;
-
-out_free_lcd:
-	kfree(lcd);
-	return ret;
 }
 
 static int s6c1372_remove(struct platform_device *pdev)
@@ -133,7 +128,6 @@ static int s6c1372_remove(struct platform_device *pdev)
 	struct s6c1372_lcd *lcd = dev_get_drvdata(&pdev->dev);
 
 	lcd_device_unregister(lcd->ld);
-	kfree(lcd);
 
 	return 0;
 }

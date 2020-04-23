@@ -574,7 +574,7 @@
 
 
 &fimd {
-	pinctrl-0 = <&lcd_clk &lcd_data24 &pwm1_out>;
+	pinctrl-0 = <&lcd_clk &lcd_data24>;
 	pinctrl-names = "default";
 	status = "okay";
 
@@ -1189,9 +1189,8 @@
 
 	ta_connected_int: ta-connected {
 		samsung,pins = "gpx1-4";
-		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
-		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
 	};
 
 	dock_int: dock-int {
@@ -1253,9 +1252,15 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
-	charger_change: charger-change {
+	charger_full_int: charger-full-int {
 		samsung,pins = "gpm0-3";
-		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+	};
+
+	charger_enable: charger-enable {
+		samsung,pins = "gpm4-2";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
