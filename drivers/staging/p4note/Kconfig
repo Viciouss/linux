@@ -7,26 +7,3 @@ config P4NOTE_IRQ_FUN
 	tristate "P4NOTE: irq experiments"
 	help
 		This will activate the irq experiment module.
-
-config SEC_P4NOTE_SWITCH
-	tristate "P4NOTE: legacy usb switch driver"
-	help
-		This will activate the code that manages the usb state by switching GPIOs.
-
-config SEC_P4NOTE_30_PIN_CON
-	tristate "P4NOTE: legacy 30 pin connector driver"
-	depends on SEC_SWITCH
-	help
-		This will activate the code that manages the propietary 30 pin Samsung cable.
-
-config SEC_P4NOTE_CHARGING
-	tristate "P4NOTE: legacy battery/charger management driver based on max17042 and smb347"
-	depends on SEC_SWITCH
-	help
-		later
-
-config SEC_P4NOTE_KEYBOARD
-	tristate "P4NOTE: legacy keyboard driver"
-	depends on SEC_SWITCH
-	help
-		later
