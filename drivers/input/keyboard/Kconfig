@@ -568,6 +568,16 @@ config KEYBOARD_SAMSUNG
 	  To compile this driver as a module, choose M here: the
 	  module will be called samsung-keypad.
 
+config KEYBOARD_SAMSUNG_EKD_K14
+	tristate "Samsung EKD K14 keyboard dock support"
+	depends on EXTCON_P4NOTE
+	help
+	  Say Y here if you want to use the Samsung keyboard dock for the P4NOTE
+	  device family.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called samsung-ekd-k14.
+
 config KEYBOARD_GOLDFISH_EVENTS
 	depends on GOLDFISH || COMPILE_TEST
 	tristate "Generic Input Event device for Goldfish"
