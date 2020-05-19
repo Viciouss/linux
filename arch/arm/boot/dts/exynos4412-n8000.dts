@@ -380,6 +380,11 @@
 		acc_5v-gpios = <&gpx3 5 GPIO_ACTIVE_HIGH>;
 	};
 
+	ekd_k14: external-keydock {
+		compatible = "samsung,ekd-k14";
+		extcon = <&extcon_p4note>;
+	};
+
 	thermal-zones {
 		cpu_thermal: cpu-thermal {
 			cooling-maps {
@@ -1140,7 +1145,6 @@
 		samsung,pins = "gpl2-7"; // + gpj0-0 for LTE version = N8020
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
-		samsung,pin-val = <1>; // FIXME: not suited for production
 	};
 
 	usb_acc_en: usb-acc-en {
@@ -1479,6 +1483,7 @@
 	clock-names = "rtc", "rtc_src";
 };
 
+// Bluetooth
 &serial_0 {
 	status = "okay";
 
@@ -1491,6 +1496,7 @@
 	};
 };
 
+// GPS
 &serial_1 {
 	status = "okay";
 };

@@ -243,7 +243,24 @@ static struct p4note_accessory_cond acc_adc_conditions[] = {
 
 #define LOG_STATE pr_info("accessory(%d) + dock(%d) + charger(%d)\n", data->accessory.last_state, data->dock.last_state, data->charger.last_state)
 
-void smdk_accessory_power(struct p4note_extcon_data *data, u8 token, bool active)
+static void check_uart_path(struct p4note_extcon_data *data, bool en)
+{
+	if (en) {
+		gpiod_set_value(data->uart_sel_1, 1);
+		if(data->uart_sel_2) {
+			gpiod_set_value(data->uart_sel_2, 1);
+		}
+		pr_info("keyboard turned on\n");
+	} else {
+		gpiod_set_value(data->uart_sel_1, 0);
+		if(data->uart_sel_2) {
+			gpiod_set_value(data->uart_sel_2, 0);
+		}
+		pr_info("keyboard turned off\n");
+	}
+}
+
+void accessory_power(struct p4note_extcon_data *data, u8 token, bool active)
 {
 	int try_cnt = 0;
 
@@ -403,14 +420,14 @@ static void usb_switch_clr_path(struct p4note_extcon_data *data, enum usb_path p
 static void enable_usb(struct p4note_extcon_data *data) {
 	mutex_lock(&data->irq_mutex);
 	usb_switch_set_path(data, USB_PATH_AP);
-	smdk_accessory_power(data, 2, true);
+	accessory_power(data, 2, true);
 	mutex_unlock(&data->irq_mutex);
 }
 
 static void disable_usb(struct p4note_extcon_data *data) {
 	mutex_lock(&data->irq_mutex);
 	usb_switch_clr_path(data, USB_PATH_AP);
-	smdk_accessory_power(data, 2, false);
+	accessory_power(data, 2, false);
 	mutex_unlock(&data->irq_mutex);
 }
 
@@ -456,6 +473,10 @@ static irqreturn_t irq_handler_dock(int irq, void *arg) {
 		if(data->dock.last_state == GPIO_OFF) {
 			pr_info("%s: connecting dock...\n", __FUNCTION__);
 			data->dock.last_state = GPIO_ON;
+			accessory_power(data, 0, false);
+			check_uart_path(data, true);
+			msleep(200);
+			accessory_power(data, 1, true);
 		} else {
 			pr_info("%s: dock already connected...\n", __FUNCTION__);
 		}
@@ -463,6 +484,8 @@ static irqreturn_t irq_handler_dock(int irq, void *arg) {
 		if(data->dock.last_state == GPIO_ON) {
 			pr_info("%s: disconnecting dock...\n", __FUNCTION__);
 			data->dock.last_state = GPIO_OFF;
+			accessory_power(data, 0, false);
+			check_uart_path(data, false);
 		} else {
 			pr_info("%s: dock already disconnected...\n", __FUNCTION__);
 		}
