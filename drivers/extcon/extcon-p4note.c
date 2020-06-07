@@ -67,6 +67,20 @@
  * The dock can be used to connect other hardware as it has a 30pin connector
  * on it's right side as well as a head phone connector on the back.
  * 
+ * Current config
+ * --------------
+ * 
+ * To computer: EXTCON_USB + EXTCON_CHG_USB_SDP
+ * To charger: EXTCON_CHG_USB_DCP
+ * Accessory: EXTCON_USB_HOST
+ * Dock: EXTCON_DOCK
+ * hdmi: EXTCON_DISP_MHL (how to determine?)
+ * 
+ * TODOs
+ * ------
+ * 
+ * - figure out hdmi detection
+ * - 
  * 
  */
 
@@ -87,20 +101,16 @@
 static const unsigned int p4note_extcon_cable[] = {
 	EXTCON_USB,
 	EXTCON_USB_HOST,
+	EXTCON_CHG_USB_SDP,
+	EXTCON_CHG_USB_DCP,
 	EXTCON_DOCK,
+	EXTCON_DISP_MHL,
 	EXTCON_JACK_LINE_OUT,
 	EXTCON_NONE,
 };
 
-struct p4note_charger_cond {
-	unsigned int type;
-	u32 min_adc;
-	u32 max_adc;
-};
-
-struct p4note_accessory_cond {
-	unsigned int type1;
-	unsigned int type2;
+struct p4note_adc_cond {
+	unsigned int type[2];
 	u32 min_adc;
 	u32 max_adc;
 };
@@ -111,11 +121,11 @@ enum gpio_state {
 };
 
 enum usb_path {
-	USB_PATH_NONE = 0,
-	USB_PATH_ADCCHECK = (1 << 28),
-	USB_PATH_TA = (1 << 24),
-	USB_PATH_CP = (1 << 20),
-	USB_PATH_AP = (1 << 16)
+	USB_PATH_NONE = 1 << 0,
+	USB_PATH_ADCCHECK = 1 << 1,
+	USB_PATH_TA = 1 << 2,
+	USB_PATH_CP = 1 << 3,
+	USB_PATH_AP = 1 << 4
 };
 
 struct p4note_gpio {
@@ -131,6 +141,7 @@ struct p4note_extcon_data {
 	struct p4note_gpio accessory;
 	struct p4note_gpio dock;
 	struct p4note_gpio charger;
+	bool dock_is_hdmi;
 
 	struct gpio_desc *accessory_enable;
 	struct gpio_desc *accessory_5v;
@@ -142,7 +153,9 @@ struct p4note_extcon_data {
 	struct gpio_desc *usb_sel_1;
 	struct gpio_desc *usb_sel_cp;
 
-	struct mutex irq_mutex;
+	struct mutex usb_mutex;
+	enum usb_path current_path;
+	u8 acc_en_token;
 
 	struct iio_channel *headphone_iio_chan;
 	struct iio_channel *charger_iio_chan;
@@ -151,20 +164,10 @@ struct p4note_extcon_data {
 	struct delayed_work acc_adc_work; 
 	struct delayed_work charger_adc_work;
 
-	enum usb_path current_path;
-
-	u8 acc_en_token;
-
-	struct p4note_accessory_cond *current_type;
+	struct p4note_adc_cond *current_charger;
+	struct p4note_adc_cond *current_accessory;
 
 };
-
-#define CHARGER_BATTERY		0
-#define CHARGER_USB			1
-#define CHARGER_AC			2
-#define CHARGER_DOCK		3
-#define CHARGER_MISC		4
-#define CHARGER_DISCHARGE	5
 
 /**
  * this is the charger connector, these values should be valid for direct
@@ -172,17 +175,16 @@ struct p4note_extcon_data {
  * 
  * adc channel: 6
  */
-static struct p4note_charger_cond charger_adc_conditions[] = {
+static struct p4note_adc_cond charger_adc_conditions[] = {
 	{
-		.type = CHARGER_AC,
+		.type = { EXTCON_CHG_USB_DCP, EXTCON_NONE },
 		.min_adc = 800,
 		.max_adc = 1800
 	},
 	{
-		// is there a sound station for the p4note? I don't think so
-		.type = CHARGER_MISC,
-		.min_adc = 550,
-		.max_adc = 700
+		.type = { EXTCON_USB, EXTCON_CHG_USB_SDP },
+		.min_adc = 0,
+		.max_adc = 4096
 	},
 	{}
 };
@@ -202,66 +204,62 @@ static struct p4note_charger_cond charger_adc_conditions[] = {
  * n8000	2193			OTG				-
  * 
  */
-static struct p4note_accessory_cond acc_adc_conditions[] = {
+static struct p4note_adc_cond acc_adc_conditions[] = {
 	{
 		// 3 pole hp + OTG
-		.type1 = EXTCON_JACK_LINE_OUT,
-		.type2 = EXTCON_USB_HOST,
+		.type = { EXTCON_JACK_LINE_OUT, EXTCON_USB_HOST },
 		.min_adc = 800,
 		.max_adc = 924
 	},
 	{
 		// 3 pole hp
-		.type1 = EXTCON_JACK_LINE_OUT,
-		.type2 = -1,
+		.type = { EXTCON_JACK_LINE_OUT, EXTCON_NONE },
 		.min_adc = 925,
 		.max_adc = 1050
 	},
 	{
 		// 4 pole hp + OTG
-		.type1 = EXTCON_JACK_LINE_OUT,
-		.type2 = EXTCON_USB_HOST,
+		.type = { EXTCON_JACK_LINE_OUT, EXTCON_USB_HOST },
 		.min_adc = 1350,
 		.max_adc = 1600
 	},
 	{
 		// 4 pole head phone
-		.type1 = EXTCON_JACK_LINE_OUT,
-		.type2 = -1,
+		.type = { EXTCON_JACK_LINE_OUT, EXTCON_NONE },
 		.min_adc = 1800,
 		.max_adc = 2059
 	},
 	{
 		// OTG
-		.type1 = EXTCON_USB_HOST,
-		.type2 = -1,
+		.type = { EXTCON_USB_HOST, EXTCON_NONE },
 		.min_adc = 2060,
 		.max_adc = 2350
 	},
 	{}
 };
 
-#define LOG_STATE pr_info("accessory(%d) + dock(%d) + charger(%d)\n", data->accessory.last_state, data->dock.last_state, data->charger.last_state)
+#define log_connceted_state(data) dev_info(data->dev, "accessory(%d) + dock(%d) + charger(%d)\n", data->accessory.last_state, data->dock.last_state, data->charger.last_state)
 
 static void check_uart_path(struct p4note_extcon_data *data, bool en)
 {
 	if (en) {
 		gpiod_set_value(data->uart_sel_1, 1);
-		if(data->uart_sel_2) {
+		if (data->uart_sel_2) {
 			gpiod_set_value(data->uart_sel_2, 1);
 		}
-		pr_info("keyboard turned on\n");
+		dev_info(data->dev, "dock turned on\n");
 	} else {
 		gpiod_set_value(data->uart_sel_1, 0);
-		if(data->uart_sel_2) {
+		if (data->uart_sel_2) {
 			gpiod_set_value(data->uart_sel_2, 0);
 		}
-		pr_info("keyboard turned off\n");
+		dev_info(data->dev, "dock turned off\n");
 	}
 }
 
 void accessory_power(struct p4note_extcon_data *data, u8 token, bool active)
 {
+	int max_try_cnt = 15;
 	int try_cnt = 0;
 
 	/*
@@ -270,10 +268,9 @@ void accessory_power(struct p4note_extcon_data *data, u8 token, bool active)
 		1 : Keyboard dock
 		2 : USB
 	*/
-
 	if (active) {
 		if (data->acc_en_token) {
-			pr_info("Board: Keyboard dock is connected.\n");
+			dev_info(data->dev, "Board: Keyboard dock is connected.\n");
 			gpiod_set_value(data->accessory_enable, 0);
 			msleep(100);
 		}
@@ -287,14 +284,13 @@ void accessory_power(struct p4note_extcon_data *data, u8 token, bool active)
 			gpiod_set_value(data->accessory_enable, 0);
 			msleep(20);
 			gpiod_set_value(data->accessory_enable, 1);
-			if (try_cnt > 10) {
+			if (try_cnt > max_try_cnt) {
 				pr_err("[acc] failed to enable the accessory_en");
 				gpiod_set_value(data->accessory_enable, 0);
 				break;
 			} else
 				try_cnt++;
 		}
-
 	} else {
 		if (0 == token) {
 			gpiod_set_value(data->accessory_enable, 0);
@@ -306,7 +302,7 @@ void accessory_power(struct p4note_extcon_data *data, u8 token, bool active)
 		}
 	}
 
-	pr_info("Board : %s (%d,%d) %s\n", __func__,
+	dev_info(data->dev, "Board : (%d,%d) %s\n",
 		token, active, data->acc_en_token ? "on" : "off");
 }
 
@@ -316,18 +312,12 @@ static void pmic_safeout2(struct p4note_extcon_data *data, int onoff)
 	if (onoff) {
 		if (!gpiod_get_value(cp)) {
 			gpiod_set_value(cp, onoff);
-			pr_info("changed usb cp to ON\n");
-		} else {
-			pr_info("%s: onoff:%d No change in safeout2\n",
-				   __func__, onoff);
+			dev_info(data->dev, "changed usb cp to ON\n");
 		}
 	} else {
 		if (gpiod_get_value(cp)) {
 			gpiod_set_value(cp, onoff);
-			pr_info("changed usb cp to OFF\n");
-		} else {
-			pr_info("%s: onoff:%d No change in safeout2\n",
-				   __func__, onoff);
+			dev_info(data->dev, "changed usb cp to OFF\n");
 		}
 	}
 }
@@ -339,28 +329,28 @@ static void usb_apply_path(struct p4note_extcon_data *data)
 	struct gpio_desc *sel1 = data->usb_sel_1;
 	struct gpio_desc *cp = data->usb_sel_cp;
 	
-	pr_info("%s: current gpio before changing : sel0:%d sel1:%d sel_cp:%d\n",
-		   __func__, gpiod_get_value(sel0),
-		   gpiod_get_value(sel1), cp ? gpiod_get_value(cp) : -1);
-	pr_info("%s: target path %x\n", __func__, path);
+	dev_info(data->dev, "current gpio before changing : sel0:%d sel1:%d sel_cp:%d\n",
+			gpiod_get_value(sel0),
+			gpiod_get_value(sel1),
+			cp ? gpiod_get_value(cp) : -1);
 
 	/* following checks are ordered according to priority */
-	if (path & USB_PATH_ADCCHECK) { // charger type detection via stmpe channel 6
-		pr_info("set USB path to ADCCHECK\n");
+	if (path & USB_PATH_ADCCHECK) {
+		dev_info(data->dev, "ADC path hit, setting gpio to 1/0\n");
 		gpiod_set_value(sel0, 1);
 		gpiod_set_value(sel1, 0);
 		goto out_nochange;
 	}
 
 	if (path & USB_PATH_TA) {
-		pr_info("set USB path to TA\n");
+		dev_info(data->dev, "TA path hit, setting gpio to 0/0\n");
 		gpiod_set_value(sel0, 0);
 		gpiod_set_value(sel1, 0);
 		goto out_nochange;
 	}
 
 	if (path & USB_PATH_CP) {
-		pr_info("set USB path to CP\n");
+		dev_info(data->dev, "CP path hit, setting gpio to 0/1\n");
 		gpiod_set_value(sel0, 0);
 		gpiod_set_value(sel1, 1);
 		mdelay(3);
@@ -368,27 +358,27 @@ static void usb_apply_path(struct p4note_extcon_data *data)
 	}
 
 	if (path & USB_PATH_AP) {
-		pr_info("set USB path to AP\n");
+		dev_info(data->dev, "AP path hit, setting gpio to 1/1\n");
 		gpiod_set_value(sel0, 1);
 		gpiod_set_value(sel1, 1);
 		goto out_ap;
 	}
 
 	/* default */
-	pr_info("set USB path to DEFAULT\n");
+	dev_info(data->dev, "no path was hit, setting gpio to default 1/1\n");
 	gpiod_set_value(sel0, 1);
 	gpiod_set_value(sel1, 1);
 
 out_ap:
-	pr_info("%s: %x safeout2 off\n", __func__, path);
 	pmic_safeout2(data, 0);
+	return;
 
 out_cp:
-	pr_info("%s: %x safeout2 on\n", __func__, path);
 	pmic_safeout2(data, 1);
+	return;
 
 out_nochange:
-	pr_info("%s: %x safeout2 no change\n", __func__, path);
+	dev_info(data->dev, "%x safeout2 no change\n", path);
 	return;
 
 }
@@ -396,135 +386,154 @@ out_nochange:
 static void usb_switch_set_path(struct p4note_extcon_data *data, enum usb_path path)
 {
 	// avoid gpio updates if not necessary
-	if((data->current_path | path) != data->current_path) {
-		pr_info("%s: current_path before changing -> %x\n", __func__, data->current_path);
+	if ((data->current_path | path) != data->current_path) {
 		data->current_path |= path;
 		usb_apply_path(data);
-	} else {
-		pr_info("%s: setting path unnecessary, skipping", __func__);
 	}
 }
 
 static void usb_switch_clr_path(struct p4note_extcon_data *data, enum usb_path path)
 {
 	// avoid gpio updates if not necessary
-	if((data->current_path & ~path) != data->current_path) {
-		pr_info("%s: current_path before changing -> %x\n", __func__, data->current_path);
+	if ((data->current_path & ~path) != data->current_path) {
 		data->current_path &= ~path;
 		usb_apply_path(data);
-	} else {
-		pr_info("%s: clearing path unnecessary, skipping", __func__);
 	}
 }
 
 static void enable_usb(struct p4note_extcon_data *data) {
-	mutex_lock(&data->irq_mutex);
+	mutex_lock(&data->usb_mutex);
 	usb_switch_set_path(data, USB_PATH_AP);
 	accessory_power(data, 2, true);
-	mutex_unlock(&data->irq_mutex);
+	mutex_unlock(&data->usb_mutex);
 }
 
 static void disable_usb(struct p4note_extcon_data *data) {
-	mutex_lock(&data->irq_mutex);
+	mutex_lock(&data->usb_mutex);
 	usb_switch_clr_path(data, USB_PATH_AP);
 	accessory_power(data, 2, false);
-	mutex_unlock(&data->irq_mutex);
+	mutex_unlock(&data->usb_mutex);
 }
 
 static void start_acc_worker(struct p4note_extcon_data *data, int timeout) {
 	cancel_delayed_work(&data->acc_adc_work);
 	schedule_delayed_work(&data->acc_adc_work, msecs_to_jiffies(timeout));
-	pr_info("new work added, starting in %d millis\n", timeout);
 }
 
-static irqreturn_t irq_handler_accessory(int irq, void *arg) {
-	struct p4note_extcon_data *data = arg;
-	
-	msleep(200);
-	
-	if(gpiod_get_value(data->accessory.desc)) {
-		if(data->accessory.last_state == GPIO_OFF) {
-			pr_info("%s: connecting accessory...\n", __FUNCTION__);
+static void update_accessory(struct p4note_extcon_data *data)
+{
+	if (gpiod_get_value(data->accessory.desc)) {
+		if (data->accessory.last_state == GPIO_OFF) {
+			dev_info(data->dev, "connecting accessory...\n");
 			data->accessory.last_state = GPIO_ON;
 			start_acc_worker(data, 0);
-		} else {
-			pr_info("%s: accessory already connected...\n", __FUNCTION__);
 		}
 	} else {
-		if(data->accessory.last_state == GPIO_ON) {
-			pr_info("%s: disconnecting accessory...\n", __FUNCTION__);
+		if (data->accessory.last_state == GPIO_ON) {
+			dev_info(data->dev, "disconnecting accessory...\n");
 			data->accessory.last_state = GPIO_OFF;
-			data->current_type = NULL;
+			data->current_accessory = NULL;
 			cancel_delayed_work(&data->acc_adc_work);
 			disable_usb(data);
-		} else {
-			pr_info("%s: accessory already disconnected...\n", __FUNCTION__);
 		}
 	}
 	
-	LOG_STATE;
+	log_connceted_state(data);
+}
+
+static irqreturn_t handle_accessory_irq(int irq, void *arg) {
+	struct p4note_extcon_data *data = arg;
+	msleep(200);
+	update_accessory(data);
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t irq_handler_dock(int irq, void *arg) {
-	struct p4note_extcon_data *data = arg;
-	
-	if(gpiod_get_value(data->dock.desc)) {
-		if(data->dock.last_state == GPIO_OFF) {
-			pr_info("%s: connecting dock...\n", __FUNCTION__);
+static void update_dock(struct p4note_extcon_data *data)
+{
+	if (gpiod_get_value(data->dock.desc)) {
+		if (data->dock.last_state == GPIO_OFF) {
+			dev_info(data->dev, "connecting dock...\n");
 			data->dock.last_state = GPIO_ON;
 			accessory_power(data, 0, false);
 			check_uart_path(data, true);
 			msleep(200);
 			accessory_power(data, 1, true);
-		} else {
-			pr_info("%s: dock already connected...\n", __FUNCTION__);
 		}
 	} else {
-		if(data->dock.last_state == GPIO_ON) {
-			pr_info("%s: disconnecting dock...\n", __FUNCTION__);
+		if (data->dock.last_state == GPIO_ON) {
+			dev_info(data->dev, "disconnecting dock...\n");
 			data->dock.last_state = GPIO_OFF;
-			accessory_power(data, 0, false);
+			accessory_power(data, 1, false);
 			check_uart_path(data, false);
-		} else {
-			pr_info("%s: dock already disconnected...\n", __FUNCTION__);
 		}
 	}
 
-	LOG_STATE;
-	// FIXMEs: 
-	// * determine type of dock (desk dock = MHL connection - or keyboard dock)
-	// * enable corresponding driver
-	// * make sure that usb is working correctly if there is a dock connected
+	log_connceted_state(data);
+}
+
+static irqreturn_t handle_dock_irq(int irq, void *arg) {
+	struct p4note_extcon_data *data = arg;
+	update_dock(data);
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t irq_handler_charger(int irq, void *arg) {
-	struct p4note_extcon_data *data = arg;
+static void p4note_set_cable_state(struct device *dev, struct extcon_dev *edev, struct p4note_adc_cond *cond, bool status)
+{
+	int err = 0;
 
-	if(gpiod_get_value(data->charger.desc)) {
-		if(data->charger.last_state == GPIO_OFF) {
-			pr_info("%s: connecting charger...\n", __FUNCTION__);
+	err = extcon_set_state_sync(edev, cond->type[0], status);
+	if (err)
+			dev_err(dev, "could not change type0 to %d: %d ", status, err);
+	if (cond->type[1] > EXTCON_NONE) {
+		err = extcon_set_state_sync(edev, cond->type[1], status);
+		if (err)
+			dev_err(dev, "could not set accessory type1: %d", err);
+	}
+}
+
+static void p4note_update_charger_path(struct p4note_extcon_data *data, bool charger_state)
+{
+	if(data->current_charger->type[0] == EXTCON_CHG_USB_DCP
+		&& charger_state && (data->current_path & USB_PATH_AP) == 0) {
+		dev_info(data->dev, "charger attached and path is not AP -> set path to TA");
+		mutex_lock(&data->usb_mutex);
+		usb_switch_set_path(data, USB_PATH_TA);
+		mutex_unlock(&data->usb_mutex);
+	} else if((data->current_path & USB_PATH_TA) != 0) {
+		dev_info(data->dev, "charger changed and path is TA -> clear TA flag");
+		mutex_lock(&data->usb_mutex);
+		usb_switch_clr_path(data, USB_PATH_TA);
+		mutex_unlock(&data->usb_mutex);
+	}
+}
+
+static void update_charger(struct p4note_extcon_data *data)
+{
+	if (gpiod_get_value(data->charger.desc)) {
+		if (data->charger.last_state == GPIO_OFF) {
+			dev_info(data->dev, "connecting charger...\n");
 			data->charger.last_state = GPIO_ON;
 
 			cancel_delayed_work(&data->charger_adc_work);
 			schedule_delayed_work(&data->charger_adc_work, msecs_to_jiffies(200));
-		} else {
-			pr_info("%s: charger already connected...\n", __FUNCTION__);
 		}
-	} else {
-		if(data->charger.last_state == GPIO_ON) {
-			pr_info("%s: disconnecting charger...\n", __FUNCTION__);
-			data->charger.last_state = GPIO_OFF;
-			cancel_delayed_work(&data->charger_adc_work);
-		} else {
-			pr_info("%s: charger already disconnected...\n", __FUNCTION__);
+	} else if (data->charger.last_state == GPIO_ON) {
+		dev_info(data->dev, "disconnecting charger...\n");
+		data->charger.last_state = GPIO_OFF;
+		cancel_delayed_work(&data->charger_adc_work);
+		if(data->current_charger) {
+			p4note_update_charger_path(data, false);
+			p4note_set_cable_state(data->dev, data->edev, data->current_charger, false);
+			data->current_charger = NULL;
 		}
 	}
 
-	LOG_STATE;
-	// FIXMEs:
-	// * turn on charging with the right settings
+	log_connceted_state(data);
+}
+
+static irqreturn_t handle_charger_irq(int irq, void *arg) {
+	struct p4note_extcon_data *data = arg;
+	update_charger(data);
 	return IRQ_HANDLED;
 }
 
@@ -541,70 +550,52 @@ static void read_accessory_adc_worker(struct work_struct *work) {
 	err = iio_read_channel_processed(data->acc_iio_chan, &adc_val);
 
 	if (err) {
-		pr_info("there was an error reading the adc value for the accessory: %d\n", err);
+		dev_info(data->dev, "there was an error reading the adc value for the accessory: %d\n", err);
 		return;
 	}
 
-	pr_info("read accessory adc value = %d\n", adc_val);
+	dev_info(data->dev, "read accessory adc value = %d\n", adc_val);
 	
-	while(acc_adc_conditions[condition_counter].type1) {
+	while (acc_adc_conditions[condition_counter].type[0]) {
 		int min = acc_adc_conditions[condition_counter].min_adc;
 		int max = acc_adc_conditions[condition_counter].max_adc;
-		if(min <= adc_val && adc_val <= max) {
+		if (min <= adc_val && adc_val <= max) {
 			break;
 		}
 		condition_counter++;
 	}
 
-	if(data->current_type != &acc_adc_conditions[condition_counter]) {
+	if (data->current_accessory != &acc_adc_conditions[condition_counter]) {
 		
-		pr_info("%s: something was changed in the current setup, setting up new type", __FUNCTION__);
-
-		if(data->current_type) {
-			extcon_set_state_sync(data->edev, data->current_type->type1, false);
-			if(data->current_type->type2 >= 0) {
-				extcon_set_state_sync(data->edev, data->current_type->type2, false);
-			}
-			data->current_type = NULL;
+		dev_info(data->dev, "accessory changed, setting up new type");
+		if (data->current_accessory) {
+			p4note_set_cable_state(data->dev, data->edev, data->current_accessory, false);
+			data->current_accessory = NULL;
 		}
 
-		if(acc_adc_conditions[condition_counter].type1) {
+		if (acc_adc_conditions[condition_counter].type[0]) {
 
-			data->current_type = &acc_adc_conditions[condition_counter];
-			pr_info("device attached with type1=%d and type2=%d\n", data->current_type->type1, data->current_type->type2);
+			data->current_accessory = &acc_adc_conditions[condition_counter];
+			dev_info(data->dev, "device attached with type1=%d and type2=%d\n", data->current_accessory->type[0], data->current_accessory->type[1]);
 			
-			if(data->current_type->type1 == EXTCON_USB_HOST || data->current_type->type2 == EXTCON_USB_HOST) {
+			if (data->current_accessory->type[0] == EXTCON_USB_HOST || data->current_accessory->type[1] == EXTCON_USB_HOST) {
 				enable_usb(data);
 			} else {
 				disable_usb(data);
 			}
 
-			extcon_set_state_sync(data->edev, data->current_type->type1, true);
-			if(data->current_type->type2 >= 0) {
-				extcon_set_state_sync(data->edev, data->current_type->type2, true);
-			}
-
+			p4note_set_cable_state(data->dev, data->edev, data->current_accessory, true);
 		} else {
-			pr_info("unknown device attached with adc value %d\n", adc_val);
+			dev_err(data->dev, "unknown accessory attached with adc value %d\n", adc_val);
 			disable_usb(data);
 		}
-	} else {
-		pr_info("%s: the cable did not change, do nothing", __FUNCTION__);
 	}
 
-	if(data->accessory.last_state == GPIO_ON && data->dock.last_state == GPIO_ON) {
+	if (data->accessory.last_state == GPIO_ON && data->dock.last_state == GPIO_ON) {
 		// both the dock and the accessory are connected, poll the adc value to get any updates
-		pr_info("rescheduling adc task as both accessory and dock line are set\n");
+		dev_info(data->dev, "rescheduling adc task as both accessory and dock line are set\n");
 		start_acc_worker(data, 3000);
-	} else {
-		if(data->dock.last_state == GPIO_ON) {
-			pr_info("acc removed or not present, stop polling\n");
-		} else {
-			pr_info("dock removed or not present, stop polling\n");
-		}
-		
 	}
-
 }
 
 static void read_charger_adc_worker(struct work_struct *work) {
@@ -617,37 +608,47 @@ static void read_charger_adc_worker(struct work_struct *work) {
 	int adc_val = 0;
 	int condition_counter = 0;
 
-	mutex_lock(&data->irq_mutex);
+	mutex_lock(&data->usb_mutex);
 	usb_switch_set_path(data, USB_PATH_ADCCHECK);
 	err = iio_read_channel_processed(data->charger_iio_chan, &adc_val);
 	usb_switch_clr_path(data, USB_PATH_ADCCHECK);
-	mutex_unlock(&data->irq_mutex);
+	mutex_unlock(&data->usb_mutex);
 
 	if (err) {
-		pr_info("there was an error reading the adc value for the charger: %d\n", err);
+		dev_info(data->dev, "there was an error reading the adc value for the charger: %d\n", err);
 		return;
 	}
 
-	pr_info("read charger adc value = %d\n", adc_val);
+	dev_info(data->dev, "read charger adc value = %d\n", adc_val);
 
-	while(charger_adc_conditions[condition_counter].type) {
+	while (charger_adc_conditions[condition_counter].type[0]) {
 		int min = charger_adc_conditions[condition_counter].min_adc;
 		int max = charger_adc_conditions[condition_counter].max_adc;
-		if(min <= adc_val && adc_val <= max) {
+		if (min <= adc_val && adc_val <= max) {
 			break;
 		}
 		condition_counter++;
 	}
 
-	if(charger_adc_conditions[condition_counter].type) {
-		struct p4note_charger_cond hit = charger_adc_conditions[condition_counter];
-		pr_info("the connected charger is of type %d\n", hit.type);
-		// FIXME: set charger type and enable charging for the correct cable
-	} else {
-		pr_info("could not determine charger, default is USB\n");
-		// FIXME: set charger type
-	}
+	if (data->current_charger != &charger_adc_conditions[condition_counter]) {
+		
+		dev_info(data->dev, "power changed, setting up new type");
+		
+		if (data->current_charger) {
+			p4note_update_charger_path(data, false);
+			p4note_set_cable_state(data->dev, data->edev, data->current_charger, false);
+			data->current_charger = NULL;
+		}
 
+		if (charger_adc_conditions[condition_counter].type[0]) {
+			data->current_charger = &charger_adc_conditions[condition_counter];
+			dev_info(data->dev, "the connected charger is of type[0] %d type[1] %d\n", data->current_charger->type[0], data->current_charger->type[1]);
+			p4note_update_charger_path(data, true);
+			p4note_set_cable_state(data->dev, data->edev, data->current_charger, true);
+		} else {
+			dev_info(data->dev, "unknown charger attached with adc value %d\n", adc_val);
+		}
+	}
 }
 
 static int p4note_extcon_probe(struct platform_device *pdev) {
@@ -655,15 +656,13 @@ static int p4note_extcon_probe(struct platform_device *pdev) {
 	int ret = 0;
 	struct device *dev = &pdev->dev;
 	struct p4note_extcon_data *data;
-	
-	pr_info("%s: p4note probe...\n", __FUNCTION__);
 
 	data = devm_kzalloc(dev, sizeof(struct p4note_extcon_data), GFP_KERNEL);
-	if(!data)
+	if (!data)
 		return -ENOMEM;
-	
-	pr_info("%s: got some memory\n", __FUNCTION__);
 
+	data->dev = dev;
+	
 	// accessory interrupt
 	data->accessory.desc = devm_gpiod_get(dev, "acc", GPIOD_IN);
 	if (IS_ERR(data->accessory.desc)) {
@@ -671,16 +670,12 @@ static int p4note_extcon_probe(struct platform_device *pdev) {
 	}
 	data->accessory.irq = gpiod_to_irq(data->accessory.desc);
 
-	ret = devm_request_threaded_irq(dev, data->accessory.irq, NULL, irq_handler_accessory, 
+	ret = devm_request_threaded_irq(dev, data->accessory.irq, NULL, handle_accessory_irq, 
 			IRQF_ONESHOT | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 			"acc_detect", data);
-	if(ret)
+	if (ret)
 		return ret;
 	
-	data->accessory.last_state = gpiod_get_value(data->accessory.desc);
-	// FIXME: fire acc detection
-	pr_info("%s: acc registerd with initial value %d\n", __FUNCTION__, data->accessory.last_state);
-
 	// (keyboard) dock interrupt
 	data->dock.desc = devm_gpiod_get(dev, "dock", GPIOD_IN);
 	if (IS_ERR(data->dock.desc)) {
@@ -688,15 +683,11 @@ static int p4note_extcon_probe(struct platform_device *pdev) {
 	}
 	data->dock.irq = gpiod_to_irq(data->dock.desc);
 
-	ret = devm_request_threaded_irq(dev, data->dock.irq, NULL, irq_handler_dock,
+	ret = devm_request_threaded_irq(dev, data->dock.irq, NULL, handle_dock_irq,
 		IRQF_ONESHOT | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 		"dock_detect", data);
-	if(ret)
+	if (ret)
 		return ret;
-
-	data->dock.last_state = gpiod_get_value(data->dock.desc);
-	// FIXME: fire dock detection
-	pr_info("%s: dock registerd with initial value %d\n", __FUNCTION__, data->dock.last_state);
 
 	// charger interrupt
 	data->charger.desc = devm_gpiod_get(dev, "charger", GPIOD_IN);
@@ -705,14 +696,10 @@ static int p4note_extcon_probe(struct platform_device *pdev) {
 	}
 	data->charger.irq = gpiod_to_irq(data->charger.desc);
 
-	ret = devm_request_threaded_irq(dev, data->charger.irq, NULL, irq_handler_charger,
+	ret = devm_request_threaded_irq(dev, data->charger.irq, NULL, handle_charger_irq,
 		IRQF_ONESHOT | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING, "charger intr", data);
-	if(ret)
+	if (ret)
 		return ret;
-	
-	data->charger.last_state = gpiod_get_value(data->charger.desc);
-	// FIXME: fire charger detection
-	pr_info("%s: charger registerd with initial value %d\n", __FUNCTION__, data->charger.last_state);
 
 	// accessory enable + 5v 
 	data->accessory_enable = devm_gpiod_get(&pdev->dev, "acc_en", GPIOD_OUT_HIGH);
@@ -731,39 +718,39 @@ static int p4note_extcon_probe(struct platform_device *pdev) {
 	data->headphone_iio_chan = devm_iio_channel_get(&pdev->dev, "headphone");
 	if (IS_ERR(data->headphone_iio_chan)) {
 		if (PTR_ERR(data->headphone_iio_chan) == -ENODEV) {
-			pr_info("%s: headphone adc is not ready, deferring\n", __FUNCTION__);
+			dev_info(data->dev, "headphone adc is not ready, deferring\n");
 			return -EPROBE_DEFER;
 		}
-		pr_info("%s: headphone error %ld\n", __FUNCTION__, PTR_ERR(data->headphone_iio_chan));
+		dev_info(data->dev, "headphone error %ld\n", PTR_ERR(data->headphone_iio_chan));
 		return PTR_ERR(data->headphone_iio_chan);
 	}
-	pr_info("%s: headphone adc found\n", __FUNCTION__);
+	dev_info(data->dev, "headphone adc found\n");
 
 	data->charger_iio_chan = devm_iio_channel_get(&pdev->dev, "charger");
 	if (IS_ERR(data->charger_iio_chan)) {
 		if (PTR_ERR(data->charger_iio_chan) == -ENODEV) {
-			pr_info("%s: charger adc is not ready, deferring\n", __FUNCTION__);
+			dev_info(data->dev, "charger adc is not ready, deferring\n");
 			return -EPROBE_DEFER;
 		}
-		pr_info("%s: charger error %ld\n", __FUNCTION__, PTR_ERR(data->headphone_iio_chan));
+		dev_info(data->dev, "charger error %ld\n", PTR_ERR(data->charger_iio_chan));
 		return PTR_ERR(data->charger_iio_chan);
 	}
-	pr_info("%s: charger adc found\n", __FUNCTION__);
+	dev_info(data->dev, "charger adc found\n");
 
 	data->acc_iio_chan = devm_iio_channel_get(&pdev->dev, "accessory");
 	if (IS_ERR(data->acc_iio_chan)) {
 		if (PTR_ERR(data->acc_iio_chan) == -ENODEV) {
-			pr_info("%s: accessory adc is not ready, deferring\n", __FUNCTION__);
+			dev_info(data->dev, "accessory adc is not ready, deferring\n");
 			return -EPROBE_DEFER;
 		}
-		pr_info("%s: accessory error %ld\n", __FUNCTION__, PTR_ERR(data->headphone_iio_chan));
+		dev_info(data->dev, "accessory error %ld\n", PTR_ERR(data->acc_iio_chan));
 		return PTR_ERR(data->acc_iio_chan);
 	}
-	pr_info("%s: accessory adc found\n", __FUNCTION__);
+	dev_info(data->dev, "accessory adc found\n");
 
 	INIT_DELAYED_WORK(&data->acc_adc_work, read_accessory_adc_worker);
 	INIT_DELAYED_WORK(&data->charger_adc_work, read_charger_adc_worker);
-	pr_info("%s: delayed work initalized\n", __FUNCTION__);
+	dev_info(data->dev, "delayed work initalized\n");
 
 	// usb path setup
 	data->usb_sel_0 = devm_gpiod_get(&pdev->dev, "usb0", GPIOD_OUT_HIGH);
@@ -784,26 +771,15 @@ static int p4note_extcon_probe(struct platform_device *pdev) {
 		return PTR_ERR(data->usb_sel_cp);
 	}
 
-	/**
-	ret = gpiod_export(data->usb_sel_0, 1);
-	if (ret)
-		return ret;
-
-	ret = gpiod_export(data->usb_sel_1, 1);
-	if (ret)
-		return ret;
-
-	ret = gpiod_export(data->usb_sel_cp, 1);
-	if (ret)
-		return ret;
-	*/
-
 	data->current_path = USB_PATH_NONE;
 
-	if ((!gpiod_get_value(data->usb_sel_0)) && (gpiod_get_value(data->usb_sel_1))) {
-		usb_switch_set_path(data, USB_PATH_CP);
-	}
+	mutex_init(&data->usb_mutex);
 
+	if (!gpiod_get_value(data->usb_sel_0) && gpiod_get_value(data->usb_sel_1)) {
+		mutex_lock(&data->usb_mutex);
+		usb_switch_set_path(data, USB_PATH_CP);
+		mutex_unlock(&data->usb_mutex);
+	}
 
 	// uart path setup
 	data->uart_sel_1 = devm_gpiod_get(&pdev->dev, "uart1", GPIOD_OUT_HIGH);
@@ -818,24 +794,8 @@ static int p4note_extcon_probe(struct platform_device *pdev) {
 		return PTR_ERR(data->uart_sel_2);
 	}
 
-	/**
-	ret = gpiod_export(data->uart_sel_1, 1);
-	if (ret)
-		return ret;
-
-	if(data->uart_sel_2) {
-		ret = gpiod_export(data->uart_sel_2, 1);
-		if (ret)
-			return ret;
-	}
-	*/
-
-	mutex_init(&data->irq_mutex);
-	pr_info("%s: mutex init done\n", __FUNCTION__);
-
 	dev_set_drvdata(dev, data);
 
-	// register extcon device
 	data->edev = devm_extcon_dev_allocate(&pdev->dev,
 			p4note_extcon_cable);
 	if (IS_ERR(data->edev)) {
@@ -849,6 +809,10 @@ static int p4note_extcon_probe(struct platform_device *pdev) {
 		return ret;
 	}
 
+	update_accessory(data);
+	update_dock(data);
+	update_charger(data);
+
 	return 0;
 }
 
@@ -859,30 +823,21 @@ static int extcon_p4note_suspend(struct device *dev)
 
 	error = enable_irq_wake(data->accessory.irq);
 	if (error) {
-		dev_err(dev->parent,
-			"failed to configure IRQ %d as wakeup source: %d\n",
-			data->accessory.irq, error);
+		dev_err(dev->parent, "failed to configure IRQ %d as wakeup source: %d\n", data->accessory.irq, error);
 		return error;
 	}
-	dev_info(dev->parent, "IRQ added as wakeup source: %d", data->accessory.irq);
 
 	error = enable_irq_wake(data->charger.irq);
 	if (error) {
-		dev_err(dev->parent,
-			"failed to configure IRQ %d as wakeup source: %d\n",
-			data->charger.irq, error);
+		dev_err(dev->parent, "failed to configure IRQ %d as wakeup source: %d\n", data->charger.irq, error);
 		return error;
 	}
-	dev_info(dev->parent, "IRQ added as wakeup source: %d", data->charger.irq);
 	
 	error = enable_irq_wake(data->dock.irq);
 	if (error) {
-		dev_err(dev->parent,
-			"failed to configure IRQ %d as wakeup source: %d\n",
-			data->dock.irq, error);
+		dev_err(dev->parent, "failed to configure IRQ %d as wakeup source: %d\n", data->dock.irq, error);
 		return error;
 	}
-	dev_info(dev->parent, "IRQ added as wakeup source: %d", data->dock.irq);
 
 	return 0;
 }
@@ -895,30 +850,21 @@ static int extcon_p4note_resume(struct device *dev)
 
 	error = disable_irq_wake(data->accessory.irq);
 	if (error) {
-		dev_err(dev->parent,
-			"failed to remove IRQ %d as wakeup source: %d\n",
-			data->accessory.irq, error);
+		dev_err(dev->parent, "failed to remove IRQ %d as wakeup source: %d\n", data->accessory.irq, error);
 		return error;
 	}
-	dev_info(dev->parent, "IRQ removed as wakeup source: %d", data->accessory.irq);
 
 	error = disable_irq_wake(data->charger.irq);
 	if (error) {
-		dev_err(dev->parent,
-			"failed to remove IRQ %d as wakeup source: %d\n",
-			data->charger.irq, error);
+		dev_err(dev->parent, "failed to remove IRQ %d as wakeup source: %d\n", data->charger.irq, error);
 		return error;
 	}
-	dev_info(dev->parent, "IRQ removed as wakeup source: %d", data->charger.irq);
 
 	error = disable_irq_wake(data->dock.irq);
 	if (error) {
-		dev_err(dev->parent,
-			"failed to remove IRQ %d as wakeup source: %d\n",
-			data->dock.irq, error);
+		dev_err(dev->parent, "failed to remove IRQ %d as wakeup source: %d\n", data->dock.irq, error);
 		return error;
 	}
-	dev_info(dev->parent, "IRQ removed as wakeup source: %d", data->dock.irq);
 
 	return 0;
 }
