@@ -109,6 +109,12 @@ struct smb347_charger_platform_data {
 	bool		use_usb_otg;
 	int		irq_gpio;
 	enum smb347_chg_enable enable_control;
+	bool		p4note_lower_otg;
+	bool		p4note_various_functions;
+	bool		p4note_stat_timer;
+	bool		disable_auto_recharge;
+	bool 		p4note_disable_therm_monitor;
+	bool		p4note_enable_lower_other;
 };
 
 #endif /* SMB347_CHARGER_H */

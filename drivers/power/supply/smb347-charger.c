@@ -25,46 +25,69 @@
  * written once %CMD_A_ALLOW_WRITE is set in %CMD_A register. They will be
  * reloaded from non-volatile registers after POR.
  */
-#define CFG_CHARGE_CURRENT			0x00
+#define CFG_CHARGE_CURRENT				0x00
 #define CFG_CHARGE_CURRENT_FCC_MASK		0xe0
-#define CFG_CHARGE_CURRENT_FCC_SHIFT		5
+#define CFG_CHARGE_CURRENT_FCC_SHIFT	5
 #define CFG_CHARGE_CURRENT_PCC_MASK		0x18
-#define CFG_CHARGE_CURRENT_PCC_SHIFT		3
+#define CFG_CHARGE_CURRENT_PCC_SHIFT	3
 #define CFG_CHARGE_CURRENT_TC_MASK		0x07
-#define CFG_CURRENT_LIMIT			0x01
+
+#define CFG_CURRENT_LIMIT				0x01
 #define CFG_CURRENT_LIMIT_DC_MASK		0xf0
 #define CFG_CURRENT_LIMIT_DC_SHIFT		4
 #define CFG_CURRENT_LIMIT_USB_MASK		0x0f
-#define CFG_FLOAT_VOLTAGE			0x03
+
+#define CFG_VARIOUS_FUNCTIONS			0x02
+#define CFG_INPUT_SOURCE_PRIORITY		BIT(2)
+
+#define CFG_FLOAT_VOLTAGE					0x03
 #define CFG_FLOAT_VOLTAGE_FLOAT_MASK		0x3f
 #define CFG_FLOAT_VOLTAGE_THRESHOLD_MASK	0xc0
 #define CFG_FLOAT_VOLTAGE_THRESHOLD_SHIFT	6
-#define CFG_STAT				0x05
-#define CFG_STAT_DISABLED			BIT(5)
+
+#define CFG_CHARGE_CONTROL					0x04
+#define CFG_AUTOMATIC_RECHARGE_DISABLE		BIT(7)
+#define CFG_AUTOMATIC_RECHARGE_DISABLE_MASK	0x80
+
+#define CFG_STAT						0x05
+#define CFG_STAT_TIMER_CTRL_MASK		0x1f
+#define CFG_STAT_TIMER_CTRL_SHIFT		0
+#define CFG_STAT_DISABLED				BIT(5)
 #define CFG_STAT_ACTIVE_HIGH			BIT(7)
-#define CFG_PIN					0x06
+
+#define CFG_PIN							0x06
 #define CFG_PIN_EN_CTRL_MASK			0x60
 #define CFG_PIN_EN_CTRL_ACTIVE_HIGH		0x40
 #define CFG_PIN_EN_CTRL_ACTIVE_LOW		0x60
-#define CFG_PIN_EN_APSD_IRQ			BIT(1)
+#define CFG_PIN_EN_APSD_IRQ				BIT(1)
 #define CFG_PIN_EN_CHARGER_ERROR		BIT(2)
-#define CFG_THERM				0x07
+#define CFG_PIN_EN_UNKNOWN_3			BIT(3)
+#define CFG_PIN_EN_UNKNOWN_4			BIT(4)
+
+#define CFG_THERM								0x07
 #define CFG_THERM_SOFT_HOT_COMPENSATION_MASK	0x03
 #define CFG_THERM_SOFT_HOT_COMPENSATION_SHIFT	0
 #define CFG_THERM_SOFT_COLD_COMPENSATION_MASK	0x0c
 #define CFG_THERM_SOFT_COLD_COMPENSATION_SHIFT	2
-#define CFG_THERM_MONITOR_DISABLED		BIT(4)
-#define CFG_SYSOK				0x08
+#define CFG_THERM_MONITOR_DISABLED				BIT(4)
+
+#define CFG_SYSOK								0x08
 #define CFG_SYSOK_SUSPEND_HARD_LIMIT_DISABLED	BIT(2)
-#define CFG_OTHER				0x09
-#define CFG_OTHER_RID_MASK			0xc0
+
+#define CFG_OTHER							0x09
+#define CFG_OTHER_P4NOTE_MASK				0x0f
+#define CFG_OTHER_RID_MASK					0xc0
 #define CFG_OTHER_RID_ENABLED_AUTO_OTG		0xc0
-#define CFG_OTG					0x0a
-#define CFG_OTG_TEMP_THRESHOLD_MASK		0x30
+
+#define CFG_OTG								0x0a
+#define CFG_OTG_TEMP_THRESHOLD_MASK			0x30
 #define CFG_OTG_TEMP_THRESHOLD_SHIFT		4
 #define CFG_OTG_CC_COMPENSATION_MASK		0xc0
 #define CFG_OTG_CC_COMPENSATION_SHIFT		6
-#define CFG_TEMP_LIMIT				0x0b
+#define CFG_OTG_P4NOTE_TLIM_LOWER_MASK		0x0f
+#define CFG_OTG_P4NOTE_TLIM_LOWER_SHIFT	0
+
+#define CFG_TEMP_LIMIT						0x0b
 #define CFG_TEMP_LIMIT_SOFT_HOT_MASK		0x03
 #define CFG_TEMP_LIMIT_SOFT_HOT_SHIFT		0
 #define CFG_TEMP_LIMIT_SOFT_COLD_MASK		0x0c
@@ -73,23 +96,35 @@
 #define CFG_TEMP_LIMIT_HARD_HOT_SHIFT		4
 #define CFG_TEMP_LIMIT_HARD_COLD_MASK		0xc0
 #define CFG_TEMP_LIMIT_HARD_COLD_SHIFT		6
+
 #define CFG_FAULT_IRQ				0x0c
 #define CFG_FAULT_IRQ_DCIN_UV			BIT(2)
+
 #define CFG_STATUS_IRQ				0x0d
 #define CFG_STATUS_IRQ_TERMINATION_OR_TAPER	BIT(4)
 #define CFG_STATUS_IRQ_CHARGE_TIMEOUT		BIT(7)
+
 #define CFG_ADDRESS				0x0e
 
 /* Command registers */
 #define CMD_A					0x30
 #define CMD_A_CHG_ENABLED			BIT(1)
 #define CMD_A_SUSPEND_ENABLED			BIT(2)
+#define CMD_A_OTG_ENABLE			BIT(4)
 #define CMD_A_ALLOW_WRITE			BIT(7)
 #define CMD_B					0x31
+#define CMD_B_POR				BIT(7)
+#define CMD_B_USB59_MODE		BIT(1)
+#define CMD_B_HC_MODE			BIT(0)
+#define CMD_B_USB_TYPE_MASK		0x03
 #define CMD_C					0x33
+
+#define DUMMY_A					0x32
+#define DUMMY_B					0x34
 
 /* Interrupt Status registers */
 #define IRQSTAT_A				0x35
+#define IRQSTAT_B				0x36
 #define IRQSTAT_C				0x37
 #define IRQSTAT_C_TERMINATION_STAT		BIT(0)
 #define IRQSTAT_C_TERMINATION_IRQ		BIT(1)
@@ -115,6 +150,7 @@
 #define STAT_C_CHG_SHIFT			1
 #define STAT_C_CHG_TERM				BIT(5)
 #define STAT_C_CHARGER_ERROR			BIT(6)
+#define STAT_D					0x3e
 #define STAT_E					0x3f
 
 #define SMB347_MAX_REGISTER			0x3f
@@ -140,7 +176,7 @@ struct smb347_charger {
 	bool			mains_online;
 	bool			usb_online;
 	bool			charging_enabled;
-	const struct smb347_charger_platform_data *pdata;
+	struct smb347_charger_platform_data *pdata;
 };
 
 enum smb_charger_chipid {
@@ -295,8 +331,10 @@ static int smb347_charging_set(struct smb347_charger *smb, bool enable)
 	if (smb->charging_enabled != enable) {
 		ret = regmap_update_bits(smb->regmap, CMD_A, CMD_A_CHG_ENABLED,
 					 enable ? CMD_A_CHG_ENABLED : 0);
-		if (!ret)
+		if (!ret) {
 			smb->charging_enabled = enable;
+			dev_dbg(smb->dev, "charging enabled: %d\n", enable);
+		}
 	}
 
 	return ret;
@@ -322,10 +360,12 @@ static int smb347_start_stop_charging(struct smb347_charger *smb)
 	 * depends on how the platform has configured the valid inputs.
 	 */
 	if (smb347_is_ps_online(smb)) {
+		dev_info(smb->dev, "ps is online, enable charging\n");
 		ret = smb347_charging_enable(smb);
 		if (ret < 0)
 			dev_err(smb->dev, "failed to enable charging\n");
 	} else {
+		dev_info(smb->dev, "ps is offline, disable charging\n");
 		ret = smb347_charging_disable(smb);
 		if (ret < 0)
 			dev_err(smb->dev, "failed to disable charging\n");
@@ -464,6 +504,16 @@ static int smb347_set_temp_limits(struct smb347_charger *smb)
 		ret = regmap_update_bits(smb->regmap, CFG_OTG,
 					 CFG_OTG_TEMP_THRESHOLD_MASK,
 					 val << CFG_OTG_TEMP_THRESHOLD_SHIFT);
+		if (ret < 0)
+			return ret;
+	}
+
+	if (smb->pdata->p4note_lower_otg) {
+		val = 0x0F;
+
+		ret = regmap_update_bits(smb->regmap, CFG_OTG,
+					 CFG_OTG_P4NOTE_TLIM_LOWER_MASK,
+					 val << CFG_OTG_P4NOTE_TLIM_LOWER_SHIFT);
 		if (ret < 0)
 			return ret;
 	}
@@ -610,36 +660,93 @@ static int smb347_hw_init(struct smb347_charger *smb)
 	int ret;
 
 	ret = smb347_set_writable(smb, true);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at writable");
 		return ret;
+	}
 
 	/*
 	 * Program the platform specific configuration values to the device
 	 * first.
 	 */
 	ret = smb347_set_charge_current(smb);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at smb347_set_charge_current");
 		goto fail;
+	}
 
 	ret = smb347_set_current_limits(smb);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at smb347_set_current_limits");
 		goto fail;
+	}
 
 	ret = smb347_set_voltage_limits(smb);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at smb347_set_voltage_limits");
 		goto fail;
+	}
 
 	ret = smb347_set_temp_limits(smb);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at smb347_set_temp_limits");
 		goto fail;
+	}
+
+	if (smb->pdata->disable_auto_recharge) {
+		ret = regmap_write_bits(smb->regmap, CFG_CHARGE_CONTROL,
+					 0xff,
+					 CFG_AUTOMATIC_RECHARGE_DISABLE);
+		if (ret < 0) {
+			dev_err(smb->dev, "failed at disable_auto_recharge: %d", ret);
+		}
+	}
+
+	if (smb->pdata->p4note_various_functions) {
+		ret =  regmap_write_bits(smb->regmap, CFG_VARIOUS_FUNCTIONS,
+					0xff,
+					0xa7);
+		if (ret < 0) {
+			dev_err(smb->dev, "failed at p4note_various_functions: %d", ret);
+		}
+	}
+
+	if (smb->pdata->p4note_stat_timer) {
+		ret = regmap_update_bits(smb->regmap, CFG_STAT,
+					CFG_STAT_TIMER_CTRL_MASK,
+					0x1a << CFG_STAT_TIMER_CTRL_SHIFT);
+		if (ret < 0) {
+			dev_err(smb->dev, "failed at p4note_stat_timer");
+		}
+	}
+
+	if (smb->pdata->p4note_disable_therm_monitor) {
+		ret = regmap_update_bits(smb->regmap, CFG_THERM,
+					0x30,
+					0x30);
+		if (ret < 0) {
+			dev_err(smb->dev, "failed at p4note_disable_therm_monitor");
+		}
+	}
+
+	if (smb->pdata->p4note_enable_lower_other) {
+		ret = regmap_update_bits(smb->regmap, CFG_OTHER,
+					CFG_OTHER_P4NOTE_MASK,
+					0x0d);
+		if (ret < 0) {
+			dev_err(smb->dev, "failed at p4note_enable_lower_other");
+		}
+	}
 
 	/* If USB charging is disabled we put the USB in suspend mode */
 	if (!smb->pdata->use_usb) {
 		ret = regmap_update_bits(smb->regmap, CMD_A,
 					 CMD_A_SUSPEND_ENABLED,
 					 CMD_A_SUSPEND_ENABLED);
-		if (ret < 0)
+		if (ret < 0) {
+			dev_err(smb->dev, "failed at use_usb");
 			goto fail;
+		}
 	}
 
 	/*
@@ -648,8 +755,10 @@ static int smb347_hw_init(struct smb347_charger *smb)
 	 */
 	ret = regmap_update_bits(smb->regmap, CFG_OTHER, CFG_OTHER_RID_MASK,
 		smb->pdata->use_usb_otg ? CFG_OTHER_RID_ENABLED_AUTO_OTG : 0);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at use_usb_otg");
 		goto fail;
+	}
 
 	/*
 	 * Make the charging functionality controllable by a write to the
@@ -670,17 +779,34 @@ static int smb347_hw_init(struct smb347_charger *smb)
 
 	ret = regmap_update_bits(smb->regmap, CFG_PIN, CFG_PIN_EN_CTRL_MASK,
 				 val);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at CFG_PIN_EN_CTRL_MASK");
 		goto fail;
+	}
 
 	/* Disable Automatic Power Source Detection (APSD) interrupt. */
 	ret = regmap_update_bits(smb->regmap, CFG_PIN, CFG_PIN_EN_APSD_IRQ, 0);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at CFG_PIN_EN_APSD_IRQ");
 		goto fail;
+	}
+
+	/* setting more p4note related stuff */
+	ret = regmap_update_bits(smb->regmap, CFG_PIN, CFG_PIN_EN_UNKNOWN_3, 0);
+		if (ret < 0) {
+		dev_err(smb->dev, "failed at CFG_PIN_EN_UNKNOWN_3");
+	}
+	
+	ret = regmap_update_bits(smb->regmap, CFG_PIN, CFG_PIN_EN_UNKNOWN_4, 0);
+		if (ret < 0) {
+		dev_err(smb->dev, "failed at CFG_PIN_EN_UNKNOWN_4");
+	}
 
 	ret = smb347_update_ps_status(smb);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_err(smb->dev, "failed at smb347_update_ps_status");
 		goto fail;
+	}
 
 	ret = smb347_start_stop_charging(smb);
 
@@ -983,6 +1109,71 @@ static int smb347_get_charging_status(struct smb347_charger *smb,
 	return status;
 }
 
+static int smb347_get_usb_type(struct smb347_charger *smb)
+{
+	enum power_supply_type type;
+	unsigned int reg;
+	int ret;
+
+	ret = regmap_read(smb->regmap, CMD_B, &reg);
+	if (ret)
+		return ret;
+
+	switch(reg & CMD_B_USB_TYPE_MASK) {
+	case (CMD_B_HC_MODE | CMD_B_USB59_MODE):
+		type = POWER_SUPPLY_USB_TYPE_DCP;
+		break;
+	case CMD_B_USB59_MODE:
+		type = POWER_SUPPLY_USB_TYPE_SDP;
+		break;
+	default:
+		type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+		break;
+	}
+
+	return type;
+}
+
+static enum power_supply_usb_type smb347_usb_types[] = {
+	POWER_SUPPLY_USB_TYPE_SDP,
+	POWER_SUPPLY_USB_TYPE_DCP,
+	POWER_SUPPLY_USB_TYPE_UNKNOWN,
+};
+
+static int smb347_set_usb_type(struct smb347_charger *smb, int val)
+{
+	unsigned int mode;
+	int old_val;
+	int err;
+
+	dev_info(smb->dev, "setting usb type to %d", val);
+
+	old_val = smb347_get_usb_type(smb);
+	if(old_val == val) {
+		dev_info(smb->dev, "setting did not change, returning");
+		return 0;
+	}
+
+	switch (val) {
+	case POWER_SUPPLY_USB_TYPE_DCP:
+		mode = CMD_B_HC_MODE | CMD_B_USB59_MODE;
+		break;
+	case POWER_SUPPLY_USB_TYPE_SDP:
+		mode = CMD_B_USB59_MODE;
+		break;
+	default:
+		dev_info(smb->dev, "cannot set unsupported usb type");
+		return -EINVAL;
+	}
+
+	dev_info(smb->dev, "sending CMD_B as %d", mode);
+
+	err = regmap_update_bits(smb->regmap, CMD_B,
+				  0x03, mode);
+
+	return err;
+}
+
 static int smb347_get_property_locked(struct power_supply *psy,
 				      enum power_supply_property prop,
 				      union power_supply_propval *val)
@@ -998,6 +1189,12 @@ static int smb347_get_property_locked(struct power_supply *psy,
 		val->intval = ret;
 		break;
 
+	case POWER_SUPPLY_PROP_USB_TYPE:
+		ret = smb347_get_usb_type(smb);
+		if (ret < 0)
+			return ret;
+		val->intval = ret;
+		break;
 	case POWER_SUPPLY_PROP_CHARGE_TYPE:
 		if (psy->desc->type == POWER_SUPPLY_TYPE_USB) {
 			if (!smb->usb_online)
@@ -1067,7 +1264,46 @@ static int smb347_get_property(struct power_supply *psy,
 	return ret;
 }
 
-static enum power_supply_property smb347_properties[] = {
+static int smb347_set_property(struct power_supply *psy,
+				enum power_supply_property psp,
+				const union power_supply_propval *val)
+{
+	int ret = 0;
+	struct smb347_charger *smb = power_supply_get_drvdata(psy);
+
+	dev_info(smb->dev, "setting property %d to value %d", psp, val->intval);
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		smb->pdata->usb_hc_current_limit = val->intval;
+		return smb347_set_current_limits(smb);
+	case POWER_SUPPLY_PROP_USB_TYPE:
+		ret = smb347_set_usb_type(smb, val->intval);
+		if(ret)
+			return ret;
+		return smb347_hw_init(smb);
+	case POWER_SUPPLY_PROP_ONLINE:
+		smb->usb_online = val->intval;
+		return smb347_start_stop_charging(smb);
+	default:
+		return -EINVAL;
+	}
+}
+
+static int smb347_property_is_writeable(struct power_supply *psy,
+					 enum power_supply_property psp)
+{
+	switch (psp) {
+	case POWER_SUPPLY_PROP_USB_TYPE:
+	case POWER_SUPPLY_PROP_ONLINE:
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static enum power_supply_property smb347_mains_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_ONLINE,
@@ -1075,17 +1311,29 @@ static enum power_supply_property smb347_properties[] = {
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
 };
 
+static enum power_supply_property smb347_usb_properties[] = {
+	POWER_SUPPLY_PROP_USB_TYPE,
+	POWER_SUPPLY_PROP_STATUS,
+	POWER_SUPPLY_PROP_CHARGE_TYPE,
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
+	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+};
+
 static bool smb347_volatile_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case IRQSTAT_A:
 	case IRQSTAT_C:
+	case IRQSTAT_B:
 	case IRQSTAT_D:
 	case IRQSTAT_E:
 	case IRQSTAT_F:
 	case STAT_A:
 	case STAT_B:
 	case STAT_C:
+	case STAT_D:
 	case STAT_E:
 		return true;
 	}
@@ -1098,7 +1346,9 @@ static bool smb347_readable_reg(struct device *dev, unsigned int reg)
 	switch (reg) {
 	case CFG_CHARGE_CURRENT:
 	case CFG_CURRENT_LIMIT:
+	case CFG_VARIOUS_FUNCTIONS:
 	case CFG_FLOAT_VOLTAGE:
+	case CFG_CHARGE_CONTROL:
 	case CFG_STAT:
 	case CFG_PIN:
 	case CFG_THERM:
@@ -1111,7 +1361,9 @@ static bool smb347_readable_reg(struct device *dev, unsigned int reg)
 	case CFG_ADDRESS:
 	case CMD_A:
 	case CMD_B:
+	case DUMMY_A:
 	case CMD_C:
+	case DUMMY_B:
 		return true;
 	}
 
@@ -1180,6 +1432,19 @@ static void smb347_dt_parse_pdata(struct device_node *np,
 	of_property_read_u32(np, "summit,enable-chg-ctrl",
 			     &pdata->enable_control);
 
+	pdata->p4note_various_functions = 
+		of_property_read_bool(np, "p4note,various-functions");
+	pdata->disable_auto_recharge =
+		of_property_read_bool(np, "summit,disable-auto-recharge");
+	pdata->p4note_stat_timer =
+		of_property_read_bool(np, "p4note,stat-timer");
+	pdata->p4note_disable_therm_monitor =
+		of_property_read_bool(np, "p4note,disable-therm-monitor");
+	pdata->p4note_enable_lower_other =
+		of_property_read_bool(np, "p4note,enable-lower-other");
+	pdata->p4note_lower_otg =
+		of_property_read_bool(np, "p4note,enable-lower-otg-range");
+	
 	/* If IRQ is enabled or not */
 	if (!of_find_property(np, "interrupts", NULL))
 		pdata->irq_gpio = -1;
@@ -1213,16 +1478,20 @@ static const struct power_supply_desc smb347_mains_desc = {
 	.name		= "smb347-mains",
 	.type		= POWER_SUPPLY_TYPE_MAINS,
 	.get_property	= smb347_get_property,
-	.properties	= smb347_properties,
-	.num_properties	= ARRAY_SIZE(smb347_properties),
+	.properties	= smb347_mains_properties,
+	.num_properties	= ARRAY_SIZE(smb347_mains_properties),
 };
 
 static const struct power_supply_desc smb347_usb_desc = {
 	.name		= "smb347-usb",
 	.type		= POWER_SUPPLY_TYPE_USB,
 	.get_property	= smb347_get_property,
-	.properties	= smb347_properties,
-	.num_properties	= ARRAY_SIZE(smb347_properties),
+	.set_property	= smb347_set_property,
+	.property_is_writeable	= smb347_property_is_writeable,
+	.properties	= smb347_usb_properties,
+	.num_properties	= ARRAY_SIZE(smb347_usb_properties),
+	.usb_types = smb347_usb_types,
+	.num_usb_types = ARRAY_SIZE(smb347_usb_types),
 };
 
 static int smb347_probe(struct i2c_client *client,
@@ -1260,14 +1529,14 @@ static int smb347_probe(struct i2c_client *client,
 	mains_usb_cfg.drv_data = smb;
 	mains_usb_cfg.of_node = dev->of_node;
 	if (smb->pdata->use_mains) {
-		smb->mains = power_supply_register(dev, &smb347_mains_desc,
+		smb->mains = devm_power_supply_register(dev, &smb347_mains_desc,
 						   &mains_usb_cfg);
 		if (IS_ERR(smb->mains))
 			return PTR_ERR(smb->mains);
 	}
 
 	if (smb->pdata->use_usb) {
-		smb->usb = power_supply_register(dev, &smb347_usb_desc,
+		smb->usb = devm_power_supply_register(dev, &smb347_usb_desc,
 						 &mains_usb_cfg);
 		if (IS_ERR(smb->usb)) {
 			if (smb->pdata->use_mains)
