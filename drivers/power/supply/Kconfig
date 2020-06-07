@@ -411,6 +411,11 @@ config CHARGER_88PM860X
 	help
 	  Say Y here to enable charger for Marvell 88PM860x chip.
 
+config P4NOTE_CHARGER_MANAGER
+	tristate "P4NOTE Charger Manager"
+	help
+	  Say Y to include support for the P4NOTE device charger manager.
+
 config CHARGER_PCF50633
 	tristate "NXP PCF50633 MBC"
 	depends on MFD_PCF50633
