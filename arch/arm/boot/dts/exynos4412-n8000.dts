@@ -19,6 +19,7 @@
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/clock/maxim,max77686.h>
 #include <dt-bindings/pinctrl/samsung.h>
+#include <dt-bindings/power/summit,smb347-charger.h>
 
 / {
 	model = "Samsung Galaxy Note 10.1 - N8000 (3G and Wifi)";
@@ -192,7 +193,6 @@
 		};
 	};
 
-	/*
 	i2c_smb347: i2c@13 {
 		compatible = "i2c-gpio";
 		sda-gpios = <&gpm2 0 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
@@ -204,18 +204,41 @@
 		status = "okay";
 
 		smb347: charger@6 {
-			// need to add CONFIG_OF to driver
-			compatible = "sme,smb347";
+			compatible = "summit,smb347";
 			reg = <0x6>;
+
 			pinctrl-names = "default";
-			pinctrl-0 = <&charger_change>;
-			gpios = <&gpm4 2 GPIO_ACTIVE_HIGH>, // enable
-					<&gpm0 3 GPIO_ACTIVE_HIGH>, // stat
-					<&gpx1 4 GPIO_ACTIVE_HIGH>; // ta_nconnected
+			pinctrl-0 = <>;
+
+			charge-term-current-microamp = <250000>;
+			precharge-current-microamp = <250000>;
+			constant-charge-current-max-microamp = <2200000>;
+			summit,usb-constant-charge-current-max-microamp = <1800000>;
+
+			constant-charge-voltage-max-microvolt = <4200000>;
+			summit,fast-volt-threshold-microvolt = <2600000>;
+
+			summit,chip-temp-threshold-celsius = <130>;
+
+			summit,soft-cold-temp-limit-celsius = <15>;
+			summit,soft-hot-temp-limit-celsius = <45>;
+
+			summit,enable-usb-charging;
+
+			summit,enable-chg-ctrl = <SMB3XX_CHG_ENABLE_SW>;
 			
+			summit,disable-auto-recharge;
+
+			summit,soft-comp-method = <SMB3XX_SOFT_TEMP_COMPENSATE_BOTH>;
+
+			// no datasheet, not sure what it does yet, taken from the old kernel pdata
+			p4note,enable-lower-otg-range; 
+			p4note,stat-timer;
+			p4note,various-functions;
+			p4note,disable-therm-monitor;
+			p4note,enable-lower-other;
 		};
 	};
-	*/
 
 	i2c_max17042: i2c@14 {
 		compatible = "i2c-gpio";
@@ -230,11 +253,15 @@
 		max17042: battery@36 {
 			compatible = "maxim,max17042";
 			reg = <0x36>;
+
 			interrupts = <3 IRQ_TYPE_EDGE_FALLING>;
 			interrupt-parent = <&gpx2>;
+
 			maxim,rsns-microohm = <10000>;
 			maxim,over-heat-temp = <600>;
 			maxim,over-volt = <4300>;
+
+			power-supplies = <&smb347>;
 		};
 	};
 
@@ -357,6 +384,21 @@
 			//"IN2RP:VXRP", "Third Mic";
 	};*/
 
+	p4note_charger_manager: charger-manager {
+		
+		compatible = "p4note,charger-manager";
+
+		pinctrl-names = "default";
+		pintctrl-0 = <&battery_low_int &battery_full_int>;
+
+		battery-full-gpios = <&gpm0 3 GPIO_ACTIVE_HIGH>;
+
+		extcon = <&extcon_p4note>;
+
+		usb-supply = <&smb347>;
+		battery-supply = <&max17042>;
+	};
+
 	extcon_p4note: external-connector {
 		compatible = "extcon,p4note";
 
@@ -380,6 +422,19 @@
 		acc_5v-gpios = <&gpx3 5 GPIO_ACTIVE_HIGH>;
 	};
 
+	/*
+	irq_fun: irq-fun {
+		compatible = "p4note,irq-test";
+		pinctrl-names = "default";
+		pinctrl-0 = <&accessory_int &dock_int &charger_int>;
+
+		acc-gpios = <&gpx0 4 GPIO_ACTIVE_LOW>;
+		dock-gpios = <&gpx1 3 GPIO_ACTIVE_LOW>;
+		charger-gpios = <&gpx1 4 GPIO_ACTIVE_HIGH>;
+		hdmi-gpios = <&gpf3 5 GPIO_ACTIVE_HIGH>;
+	};
+	*/
+
 	ekd_k14: external-keydock {
 		compatible = "samsung,ekd-k14";
 		extcon = <&extcon_p4note>;
@@ -391,7 +446,7 @@
 				map0 {
 					/* Corresponds to 800MHz at freq_table */
 					cooling-device = <&cpu0 7 7>, <&cpu1 7 7>,
-						      <&cpu2 7 7>, <&cpu3 7 7>;
+							  <&cpu2 7 7>, <&cpu3 7 7>;
 				};
 				map1 {
 					/* Corresponds to 200MHz at freq_table */
@@ -1011,7 +1066,13 @@
 
 &pinctrl_0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep0 &ear_mic_bias &lineout_en>;
+	pinctrl-0 = <&sleep0 &ear_mic_bias &lineout_en &mhl_int>;
+
+	mhl_int: mhl-int {
+		samsung,pins = "gpf3-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+	};
 
 	tsp_ldo_init: tsp-ldo-init {
 		samsung,pins = "gpb-5", "gpb-7";
@@ -1145,6 +1206,7 @@
 		samsung,pins = "gpl2-7"; // + gpj0-0 for LTE version = N8020
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-val = <1>;
 	};
 
 	usb_acc_en: usb-acc-en {
@@ -1234,7 +1296,13 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
-	charger_change: charger-change {
+	battery_low_int: battery-low-int {
+		samsung,pins = "gpx2-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+	};
+
+	battery_full_int: battery-full-int {
 		samsung,pins = "gpm0-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
