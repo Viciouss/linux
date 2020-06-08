@@ -458,6 +458,7 @@ static void update_dock(struct p4note_extcon_data *data)
 			check_uart_path(data, true);
 			msleep(200);
 			accessory_power(data, 1, true);
+			extcon_set_state_sync(data->edev, EXTCON_DOCK, true);
 		}
 	} else {
 		if (data->dock.last_state == GPIO_ON) {
@@ -465,6 +466,7 @@ static void update_dock(struct p4note_extcon_data *data)
 			data->dock.last_state = GPIO_OFF;
 			accessory_power(data, 1, false);
 			check_uart_path(data, false);
+			extcon_set_state_sync(data->edev, EXTCON_DOCK, false);
 		}
 	}
 
