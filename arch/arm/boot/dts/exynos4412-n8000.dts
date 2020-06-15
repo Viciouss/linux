@@ -193,10 +193,18 @@
 		ak8975: magnetometer@c {
 			compatible = "asahi-kasei,ak8975";
 			reg = <0x0c>;
-			interrupt-parent = <&gpm4>;
-			interrupts = <7 IRQ_TYPE_EDGE_RISING>;
+			gpios = <&gpm4 7 GPIO_ACTIVE_HIGH>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&ak8975_interrupt>;
+			pinctrl-0 = <&ak8975_gpio>;
+			mount-matrix = "-0.984807753012208", /* x0 */
+							"0", /* y0 */
+							"-0.173648177666930", /* z0 */
+							"0", /* x1 */
+							"-1", /* y1 */
+							"0", /* z1 */
+							"-0.173648177666930", /* x2 */
+							"0", /* y2 */
+							"0.984807753012208"; /* z2 */
 		};
 	};
 
@@ -1325,7 +1333,7 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
-	ak8975_interrupt: ak8975-interrupt {
+	ak8975_gpio: ak8975-gpio {
 		samsung,pins = "gpm4-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
