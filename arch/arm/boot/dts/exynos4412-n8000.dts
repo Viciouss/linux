@@ -142,6 +142,8 @@
 
 	lcd_display: s6c1372 {
 		compatible = "samsung,s6c1372";
+		pinctrl-names = "default";
+		pinctrl-0 = <&backlight_reset &lvds_nshdn>;
 		gpios = <&gpm0 1 GPIO_ACTIVE_HIGH
 					&gpm0 5 GPIO_ACTIVE_HIGH>;
 
@@ -631,7 +633,7 @@
 		native-mode = <&timing0>;
 		timing0: 800p24 {
 			/* 1280x800p24 */
-			clock-frequency = <60000000>;
+			clock-frequency = <66666666>;
 			hactive = <1280>;
 			vactive = <800>;
 			hfront-porch = <18>;
@@ -1192,6 +1194,18 @@
 	pinctrl-names = "default";
 	// FIXME: move usb_sel and uart_sel to the extcon driver after it is finished
 	pinctrl-0 = <&sleep1 &usb_sel &uart_sel &usb_acc_en &usb_acc_5v>;
+
+	backlight_reset: backlight-reset {
+		samsung,pins = "gpm0-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	lvds_nshdn: lvds-nshdn {
+		samsung,pins = "gpm0-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
 
 	usb_sel: usb-sel {
 		samsung,pins = "gpy0-4", "gpy0-5", "gpm0-7";

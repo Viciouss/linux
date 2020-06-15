@@ -31,6 +31,7 @@ struct s6c1372_lcd {
 	int gpio_lcds_nshdn;
 };
 
+// enable lvds display interface first, then power on the backlight
 static int lvds_lcd_set_power(struct lcd_device *ld, int power)
 {
 	struct s6c1372_lcd *lcd = lcd_get_data(ld);
@@ -40,7 +41,7 @@ static int lvds_lcd_set_power(struct lcd_device *ld, int power)
 		return -EINVAL;
 	}
 
-	if (power)
+	if (power && !lcd->power)
 	{
 		/* LVDS_N_SHDN to high*/
 		mdelay(1);
@@ -50,7 +51,7 @@ static int lvds_lcd_set_power(struct lcd_device *ld, int power)
 		gpio_set_value(lcd->gpio_reset, 1);
 		mdelay(2);
 	}
-	else
+	else if(!power && lcd->power)
 	{
 		gpio_set_value(lcd->gpio_reset, 0);
 		msleep(200);
