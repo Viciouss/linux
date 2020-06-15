@@ -116,9 +116,12 @@
 	mic_bias_reg: mic-bias-reg {
 		compatible = "regulator-fixed";
 		regulator-name = "MICBIAS_LDO_2.8V";
+		pinctrl-names = "default";
+		pinctrl-0 = <&main_mic_bias>;
 		regulator-min-microvolt = <2800000>;
 		regulator-max-microvolt = <2800000>;
 		gpios = <&gpm0 0 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
 	};
 
 	wlan_pwrseq: sdhci3-pwrseq {
@@ -134,6 +137,7 @@
 		pinctrl-0 = <&pinctrl_0>;
 		gpios = <&gpc0 1 GPIO_ACTIVE_HIGH>;
 		power-domains = <&pd_lcd0>;
+		default-on;
 	};
 
 	lcd_display: s6c1372 {
@@ -168,6 +172,7 @@
 
 		/*
 		al3201: light-sensor@1c {
+			reg = <0x1c>;
 			// to be ported
 		};
 		*/
@@ -335,18 +340,13 @@
 	};
 	*/
 
-	wm1811_n8000: sound {
-		compatible = "samsung,smdk-wm8994";
-
-		samsung,i2s-controller = <&i2s0>;
-		samsung,audio-codec = <&wm1811>;
-	};
-
-	/*wm1811_n8000: sound {
-		compatible = "samsung,midas-audio";
-		model = "WM1811 @ N8000";
+	sound: sound {
+		compatible = "samsung,p4note-audio";
+		model = "p4note";
 		mic-bias-supply = <&mic_bias_reg>;
 		lineout-sel-gpios = <&gpj1 2 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&lineout_en>;
 		i2s-controller = <&i2s0>;
 		audio-codec = <&wm1811>;
 		samsung,audio-routing =
@@ -361,28 +361,28 @@
 			"RCV", "HPOUT2N",
 			"RCV", "HPOUT2P",
 
-			//"LINE", "LINEOUT2N",
-			//"LINE", "LINEOUT2P",
+			"LINE", "LINEOUT2N",
+			"LINE", "LINEOUT2P",
 
 			"HDMI", "LINEOUT1N",
 			"HDMI", "LINEOUT1P",
 
-			"IN1LP", "MICBIAS1",
+			/* "IN1LP", "MICBIAS1",
 			"IN1LN", "MICBIAS1",
-			//"MICBIAS1", "Main Mic",
+			"MICBIAS1", "Main Mic", */
 
 			"IN1RP", "Sub Mic",
-			"IN1RN", "Sub Mic";
+			"IN1RN", "Sub Mic",
 
-			//"IN2LP:VXRN", "MICBIAS2",
-			//"MICBIAS2", "Headset Mic",
+			/* "IN2LP:VXRN", "MICBIAS2",
+			"MICBIAS2", "Headset Mic", */
 
-			//"IN2RN", "FM In",
-			//"IN2RP:VXRP", "FM In",
+			"IN2RN", "FM In",
+			"IN2RP:VXRP", "FM In";
 
-			//"IN2RN", "Third Mic",
-			//"IN2RP:VXRP", "Third Mic";
-	};*/
+			/* "IN2RN", "Third Mic",
+			"IN2RP:VXRP", "Third Mic"; */
+	};
 
 	p4note_charger_manager: charger-manager {
 		
@@ -694,7 +694,7 @@
 	// audio
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
-	samsung,i2c-max-bus-freq = <100000>;
+	samsung,i2c-max-bus-freq = <400000>;
 	pinctrl-0 = <&i2c4_bus>;
 	pinctrl-names = "default";
 	status = "okay";
@@ -703,9 +703,8 @@
 		compatible = "wlf,wm1811";
 		reg = <0x1a>;
 		
-		clocks = <&pmu_system_controller 0>,
-				<&max77686 MAX77686_CLK_PMIC>;
-		clock-names = "MCLK1", "MCLK2";
+		clocks = <&pmu_system_controller 0>;
+		clock-names = "MCLK1";
 		
 		gpio-controller;
 		#gpio-cells = <2>;
@@ -723,8 +722,6 @@
 		wlf,gpio-cfg = <0x3 0x0 0x0 0x0 0x0 0x0 0x0 0x8000 0x0 0x0 0x0>;
 		
 		wlf,lineout1-feedback;
-		wlf,lineout1-se;
-		wlf,lineout2-se;
 		
 		wlf,ldo1ena-gpios = <&gpm4 4 GPIO_ACTIVE_HIGH>;
 		wlf,ldoena-always-driven;
@@ -1066,7 +1063,7 @@
 
 &pinctrl_0 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&sleep0 &ear_mic_bias &lineout_en &mhl_int>;
+	pinctrl-0 = <&sleep0 &ear_mic_bias &mhl_int>;
 
 	mhl_int: mhl-int {
 		samsung,pins = "gpf3-5";
@@ -1194,7 +1191,7 @@
 &pinctrl_1 {
 	pinctrl-names = "default";
 	// FIXME: move usb_sel and uart_sel to the extcon driver after it is finished
-	pinctrl-0 = <&sleep1 &main_mic_bias &usb_sel &uart_sel &usb_acc_en &usb_acc_5v>;
+	pinctrl-0 = <&sleep1 &usb_sel &uart_sel &usb_acc_en &usb_acc_5v>;
 
 	usb_sel: usb-sel {
 		samsung,pins = "gpy0-4", "gpy0-5", "gpm0-7";
