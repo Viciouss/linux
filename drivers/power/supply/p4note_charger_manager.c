@@ -137,8 +137,6 @@ static void charger_connected_worker(struct work_struct *work)
 	struct p4note_manager_data *data = container_of(dwork, struct p4note_manager_data, charger_work);
 	union power_supply_propval val;
 
-	dev_info(data->dev, "updating current battery and charger health status...");
-
 	power_supply_get_property(data->battery, POWER_SUPPLY_PROP_HEALTH, &val);
 	if(val.intval != POWER_SUPPLY_HEALTH_GOOD) {
 		dev_info(data->dev, "battery is not in good health, disable charging!");
@@ -146,7 +144,6 @@ static void charger_connected_worker(struct work_struct *work)
 	}
 
 	if(data->charger_connected) {
-		dev_info(data->dev, "charger still connected, going another round");
 		schedule_delayed_work(&data->charger_work, msecs_to_jiffies(data->charger_poll_delay));
 	} else {
 		dev_info(data->dev, "charger disconnected, no more polling");
