@@ -15,6 +15,7 @@
 #include <linux/hrtimer.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/pwm.h>
 #include <linux/mutex.h>
 #include <linux/clk.h>
@@ -33,7 +34,7 @@
 #include <linux/pinctrl/consumer.h>
 
 #include <asm/mach-types.h>
-#include "leds-isa1200.h"
+#include "isa1200_vibrator.h"
 
 #define AMPLITUDE_MIN     0
 #define AMPLITUDE_MAX     254
@@ -41,7 +42,7 @@
 
 struct isa1200_vibrator_drvdata {
 	struct i2c_client *client;
-	struct led_classdev cdev;
+	struct pwm_device *pwm_dev;
 
 	struct clk *vib_clk;
 	struct gpio_desc *enable_gpio;
@@ -71,7 +72,6 @@ struct isa1200_vibrator_drvdata {
 	u8 period;
 };
 
-/////////////////////////////////////////////////////////////////////////////////////
 
 static int amplitude_to_duty(int period, int amplitude)
 {
@@ -86,7 +86,7 @@ static int isa1200_vibrator_i2c_write(struct i2c_client *client,
 	int error = 0;
 	error = i2c_smbus_write_byte_data(client, addr, val);
 	if (error)
-		printk(KERN_ERR "[VIB] Failed to write addr=[0x%x], val=[0x%x]\n",
+		dev_err(&client->dev, "[VIB] Failed to write addr=[0x%x], val=[0x%x]\n",
 				addr, val);
 
 	return error;
@@ -110,15 +110,13 @@ static void isa1200_vibrator_hw_init(struct isa1200_vibrator_drvdata *vib)
 	isa1200_vibrator_i2c_write(vib->client,
 		HAPTIC_PWM_PERIOD_REG, vib->period);
 
-#ifdef MOTOR_DEBUG
-	printk(KERN_DEBUG "[VIB] ctrl0 = 0x%x\n", vib->ctrl0);
-	printk(KERN_DEBUG "[VIB] ctrl1 = 0x%x\n", vib->ctrl1);
-	printk(KERN_DEBUG "[VIB] ctrl2 = 0x%x\n", vib->ctrl2);
-	printk(KERN_DEBUG "[VIB] pll = 0x%x\n", vib->pll);
-	printk(KERN_DEBUG "[VIB] ctrl4 = 0x%x\n", vib->ctrl4);
-	printk(KERN_DEBUG "[VIB] duty = 0x%x\n", vib->period/2);
-	printk(KERN_DEBUG "[VIB] period = 0x%x\n", vib->period);
-#endif
+	dev_dbg(&vib->client->dev, "[VIB] ctrl0 = 0x%x\n", vib->ctrl0);
+	dev_dbg(&vib->client->dev, "[VIB] ctrl1 = 0x%x\n", vib->ctrl1);
+	dev_dbg(&vib->client->dev, "[VIB] ctrl2 = 0x%x\n", vib->ctrl2);
+	dev_dbg(&vib->client->dev, "[VIB] pll = 0x%x\n", vib->pll);
+	dev_dbg(&vib->client->dev, "[VIB] ctrl4 = 0x%x\n", vib->ctrl4);
+	dev_dbg(&vib->client->dev, "[VIB] duty = 0x%x\n", vib->period/2);
+	dev_dbg(&vib->client->dev, "[VIB] period = 0x%x\n", vib->period);
 
 }
 
@@ -126,7 +124,7 @@ static void isa1200_vibrator_on(struct isa1200_vibrator_drvdata *vib)
 {
 	int duty = vib->duty;
 
-	pr_debug("%s\n", __func__);
+	dev_dbg(&vib->client->dev, "entering %s\n", __func__);
 
 	if (vib->duty >= vib->period) {
 		duty -= 3;
@@ -136,15 +134,15 @@ static void isa1200_vibrator_on(struct isa1200_vibrator_drvdata *vib)
 		HAPTIC_CONTROL_REG0, vib->ctrl0 | CTL0_NORMAL_OP);
 	isa1200_vibrator_i2c_write(vib->client,
 		HAPTIC_PWM_DUTY_REG, vib->duty);
-#ifdef MOTOR_DEBUG
-	printk(KERN_DEBUG "[VIB] ctrl0 = 0x%x\n", vib->ctrl0 | CTL0_NORMAL_OP);
-	printk(KERN_DEBUG "[VIB] duty = 0x%x\n", duty);
-#endif
+
+	dev_dbg(&vib->client->dev, "[VIB] ctrl0 = 0x%x\n", vib->ctrl0 | CTL0_NORMAL_OP);
+	dev_dbg(&vib->client->dev, "[VIB] duty = 0x%x\n", duty);
+
 }
 
 static void isa1200_vibrator_off(struct isa1200_vibrator_drvdata *vib)
 {
-	pr_debug("%s\n", __func__);
+	dev_dbg(&vib->client->dev, "entering %s\n", __func__);
 	isa1200_vibrator_i2c_write(vib->client,
 		HAPTIC_PWM_DUTY_REG, vib->period/2);
 	isa1200_vibrator_i2c_write(vib->client,
@@ -158,7 +156,7 @@ static void isa1200_vibrator_work(struct work_struct *work)
 	struct i2c_client* client = vib->client;
 	int err;
 
-	pr_debug("%s\n", __func__);
+	dev_dbg(&vib->client->dev, "entering %s\n", __func__);
 
 	if (vib->timeout == 0) {
 		if (!vib->running)
@@ -171,8 +169,7 @@ static void isa1200_vibrator_work(struct work_struct *work)
 		if (vib->pinctrl && vib->off_state) {
 			err = pinctrl_select_state(vib->pinctrl, vib->off_state);
 			if (err != 0)
-				dev_err(&client->dev,
-					"%s: error setting pinctrl off state. err=%d\n", __func__, err);
+				dev_err(&client->dev, "error setting pinctrl off state. err=%d\n", err);
 		}
 
 	} else {
@@ -184,8 +181,7 @@ static void isa1200_vibrator_work(struct work_struct *work)
 		if (vib->pinctrl && vib->on_state) {
 			err = pinctrl_select_state(vib->pinctrl, vib->on_state);
 			if (err != 0) {
-				dev_err(&client->dev,
-					"%s: error setting pinctrl on state. err=%d\n", __func__, err);
+				dev_err(&client->dev, "error setting pinctrl on state. err=%d\n", err);
 				return;
 			}
 		}
@@ -207,39 +203,20 @@ static enum hrtimer_restart isa1200_vibrator_timer_func(struct hrtimer *_timer)
 	return HRTIMER_NORESTART;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////
-
-static void isa1200_brightness_set(struct led_classdev *led_cdev,
-	enum led_brightness value)
-{
-	pr_info("%s: value=%d\n", __func__, value);
-
-	led_cdev->brightness = value;
-}
-
-static int isa1200_blink_set(struct led_classdev *cdev,
-	unsigned long *delay_on,
-	unsigned long *delay_off)
-{
-	pr_info("%s\n", __func__);
-	return 0;
-}
-
 static ssize_t enable_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
-	struct led_classdev *led_cdev = dev_get_drvdata(dev);
-	struct isa1200_vibrator_drvdata *vib =
-			container_of(led_cdev, struct isa1200_vibrator_drvdata, cdev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct isa1200_vibrator_drvdata *vib = i2c_get_clientdata(client);
+
 	unsigned long	flags;
 	int value;
 
 	sscanf(buf, "%d", &value);
-	pr_debug("%s timeout=%d\n", __func__, value);
+	dev_dbg(dev, "%s timeout=%d\n", __func__, value);
 
-#ifdef MOTOR_DEBUG
-	printk(KERN_DEBUG "[VIB] time = %dms\n", value);
-#endif
+	dev_dbg(dev, "[VIB] time = %dms\n", value);
+
 	cancel_delayed_work(&vib->work);
 	hrtimer_cancel(&vib->timer);
 	vib->timeout = value;
@@ -261,9 +238,8 @@ static ssize_t enable_store(struct device *dev,
 static ssize_t amplitude_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct led_classdev *led_cdev = dev_get_drvdata(dev);
-	struct isa1200_vibrator_drvdata *vib =
-			container_of(led_cdev, struct isa1200_vibrator_drvdata, cdev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct isa1200_vibrator_drvdata *vib = i2c_get_clientdata(client);
 
 	return sprintf(buf, "%d\n", vib->amplitude);
 }
@@ -271,9 +247,9 @@ static ssize_t amplitude_show(struct device *dev,
 static ssize_t amplitude_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
-	struct led_classdev *led_cdev = dev_get_drvdata(dev);
-	struct isa1200_vibrator_drvdata *vib =
-			container_of(led_cdev, struct isa1200_vibrator_drvdata, cdev);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct isa1200_vibrator_drvdata *vib = i2c_get_clientdata(client);
+
 	int amplitude;
 
 	sscanf(buf, "%d", &amplitude);
@@ -286,7 +262,7 @@ static ssize_t amplitude_store(struct device *dev,
 	vib->duty = amplitude_to_duty(vib->period, amplitude);
 	vib->amplitude = amplitude;
 
-	pr_debug("%s: amplitude=%d duty_cycle=%d\n", __func__, amplitude, vib->duty);
+	dev_dbg(&client->dev, "amplitude=%d duty_cycle=%d\n", amplitude, vib->duty);
 
 	return size;
 }
@@ -310,31 +286,27 @@ static int isa1200_init_pinctrl(struct isa1200_vibrator_drvdata *ddata)
 
 	pinctrl = devm_pinctrl_get(&client->dev);
 	if (IS_ERR(pinctrl)) {
-		dev_info(&client->dev,
-			"%s: not using pinctrl.\n", __func__);
+		dev_info(&client->dev, "not using pinctrl.\n");
 		return 0;
 	}
 
 	off_state = pinctrl_lookup_state(pinctrl, "off");
 	if (IS_ERR(off_state)) {
-		dev_err(&client->dev,
-			"%s: error getting pinctrl off state\n", __func__);
+		dev_err(&client->dev, "error getting pinctrl off state\n");
 		err = -ENODEV;
 		goto err;
 	}
 
 	on_state = pinctrl_lookup_state(pinctrl, "on");
 	if (IS_ERR(on_state)) {
-		dev_err(&client->dev,
-			"%s: error getting pinctrl on state\n", __func__);
+		dev_err(&client->dev, "error getting pinctrl on state\n");
 		err = -ENODEV;
 		goto err;
 	}
 
 	err = pinctrl_select_state(pinctrl, off_state);
 	if (err) {
-		dev_err(&client->dev,
-			"%s: error setting pinctrl off state. err=%d\n", __func__, err);
+		dev_err(&client->dev, "error setting pinctrl off state. err=%d\n", err);
 		err = -ENODEV;
 		goto err;
 	}
@@ -407,13 +379,13 @@ static int isa1200_vibrator_i2c_probe(struct i2c_client *client,
 	struct isa1200_vibrator_drvdata *ddata;
 	int i, ret = 0;
 
-	printk(KERN_DEBUG "[VIB] %s\n", __func__);
+	dev_dbg(&client->dev, "[VIB] %s\n", __func__);
 
-	ddata = kzalloc(sizeof(struct isa1200_vibrator_drvdata), GFP_KERNEL);
+	ddata = devm_kzalloc(&client->dev, sizeof(struct isa1200_vibrator_drvdata), GFP_KERNEL);
 	if (NULL == ddata) {
-		printk(KERN_ERR "[VIB] Failed to alloc memory\n");
+		dev_err(&client->dev, "[VIB] Failed to alloc memory\n");
 		ret = -ENOMEM;
-		goto err_free_mem;
+		return ret;
 	}
 
 	if (client->dev.platform_data) {
@@ -431,26 +403,20 @@ static int isa1200_vibrator_i2c_probe(struct i2c_client *client,
 	} else if (client->dev.of_node) {
 		ret = isa1200_parse_dt(client, ddata);
 		if (ret) {
-			pr_err("%s: error parsing device tree\n", __func__);
-			goto err_free_mem;
+			dev_err(&client->dev, "error parsing device tree\n");
+			return ret;
 		}
 	}
 
 	ddata->client = client;
 
-	ddata->cdev.name = "isa1200";
-	ddata->cdev.flags = LED_CORE_SUSPENDRESUME;
-	ddata->cdev.brightness_set = isa1200_brightness_set;
-	ddata->cdev.blink_set = isa1200_blink_set;
-	ddata->cdev.default_trigger = "none";
 	i2c_set_clientdata(client, ddata);
-
+	
 	ret = isa1200_init_pinctrl(ddata);
 	if (ret)
-		goto err_free_mem;
+		return ret;
 
 	isa1200_vibrator_hw_init(ddata);
-
 
 	hrtimer_init(&ddata->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	ddata->timer.function = isa1200_vibrator_timer_func;
@@ -458,75 +424,62 @@ static int isa1200_vibrator_i2c_probe(struct i2c_client *client,
 	ddata->wq = create_singlethread_workqueue("isa1200");
 	INIT_DELAYED_WORK(&ddata->work, isa1200_vibrator_work);
 
-	ret = led_classdev_register(&client->dev, &ddata->cdev);
-	if (ret < 0)
-		goto err_free_mem;
-
 	for (i = 0; i < ARRAY_SIZE(isa1200_device_attrs); i++) {
-		ret = device_create_file(ddata->cdev.dev, &isa1200_device_attrs[i]);
+		ret = device_create_file(&client->dev, &isa1200_device_attrs[i]);
 		if (ret < 0) {
-			dev_err(&client->dev,
-					"%s: failed to create sysfs attributes\n", __func__);
-			goto err_free_mem;
+			dev_err(&client->dev, "failed to create sysfs attributes\n");
+			return ret;
 		}
 	}
 
 	return 0;
 
-err_free_mem:
-	kfree(ddata);
-	return ret;
-
 }
 
 static int isa1200_vibrator_i2c_remove(struct i2c_client *client)
 {
-	struct isa1200_vibrator_drvdata *ddata  = i2c_get_clientdata(client);
-	struct led_classdev *led_cdev = &ddata->cdev;
+	struct isa1200_vibrator_drvdata *data  = i2c_get_clientdata(client);
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(isa1200_device_attrs); i++) {
-		 device_remove_file(led_cdev->dev, &isa1200_device_attrs[i]);
+		 device_remove_file(&data->client->dev, &isa1200_device_attrs[i]);
 	}
 
-	led_classdev_unregister(led_cdev);
+	flush_workqueue(data->wq);
+	destroy_workqueue(data->wq);
+	data->wq = NULL;
 
-	flush_workqueue(ddata->wq);
-	destroy_workqueue(ddata->wq);
-	ddata->wq = NULL;
-
-	kfree(ddata);
+	kfree(data);
 
 	return 0;
 }
 
-#if 0
 static int isa1200_vibrator_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct isa1200_vibrator_drvdata *vib  = i2c_get_clientdata(client);
-	gpio_direction_output(vib->gpio_en, 0);
+	
+	gpiod_set_value(vib->enable_gpio, 0);
+	
 	return 0;
 }
 
 static int isa1200_vibrator_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
-	struct isa1200_vibrator_drvdata *vib  = i2c_get_clientdata(client);
-	// isa1200_vibrator_hw_init(ddata);
-	gpio_direction_output(vib->gpio_en, 1);
+	struct isa1200_vibrator_drvdata *data  = i2c_get_clientdata(client);
+	
+	gpiod_set_value(data->enable_gpio, 1);
+	isa1200_vibrator_hw_init(data);
+
 	return 0;
 }
 
 static SIMPLE_DEV_PM_OPS(isa1200_pm,
 	isa1200_vibrator_suspend, isa1200_vibrator_resume);
-#define ISA1200_PM &isa1200_pm
-#else
-#define ISA1200_PM NULL
-#endif
 
 static const struct i2c_device_id isa1200_vibrator_device_id[] = {
-	{"isa1200_vibrator", 0},
+	{ "isa1200_vibrator", 0 },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, isa1200_vibrator_device_id);
@@ -541,8 +494,8 @@ MODULE_DEVICE_TABLE(of, isa1200_dt_match);
 
 static struct i2c_driver isa1200_vibrator_i2c_driver = {
 	.driver = {
-		.name = "isa1200_vibrator",
-		.pm = ISA1200_PM,
+		.name = "isa1200-vibrator",
+		.pm = &isa1200_pm,
 		.of_match_table = of_match_ptr(isa1200_dt_match),
 		.owner = THIS_MODULE,
 	},
