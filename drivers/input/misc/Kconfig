@@ -879,4 +879,14 @@ config INPUT_STPMIC1_ONKEY
 	  To compile this driver as a module, choose M here: the
 	  module will be called stpmic1_onkey.
 
+config INPUT_ISA1200_VIBRATOR
+	tristate "Support for the ISA1200 vibrator"
+	default n
+	depends on I2C
+	help
+	  Say Y to enalbe the ISA1200 I2C driver.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called isa1200-vibrator.
+
 endif
