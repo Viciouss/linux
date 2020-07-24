@@ -37,6 +37,16 @@
  * CPU Interface.
  */
 
+enum {
+	FIMD_OUTPUT_RGB,
+	FIMD_OUTPUT_BGR,
+};
+
+static int pixel_order = FIMD_OUTPUT_RGB;
+module_param(pixel_order, int, 0);
+MODULE_PARM_DESC(pixel_order, "RGB interface pixel order (rgb = 0 (default), "
+                 "bgr = 1)");
+
 #define MIN_FB_WIDTH_FOR_16WORD_BURST 128
 
 /* position control register for hardware window 0, 2 ~ 4.*/
@@ -218,15 +228,22 @@ static const enum drm_plane_type fimd_win_types[WINDOWS_NR] = {
 	DRM_PLANE_TYPE_CURSOR,
 };
 
-static const uint32_t fimd_formats[] = {
+static const uint32_t fimd_rgb_formats[] = {
 	DRM_FORMAT_C8,
 	DRM_FORMAT_XRGB1555,
 	DRM_FORMAT_RGB565,
 	DRM_FORMAT_XRGB8888,
 	DRM_FORMAT_ARGB8888,
-	DRM_FORMAT_ABGR8888,
+};
+
+static const uint32_t fimd_bgr_formats[] = {
+    // TODO: remove this, needed for Linux logo to show up
 	DRM_FORMAT_XRGB8888,
+
+	DRM_FORMAT_XBGR1555,
+	DRM_FORMAT_BGR565,
 	DRM_FORMAT_XBGR8888,
+	DRM_FORMAT_ABGR8888,
 };
 
 static const unsigned int capabilities[WINDOWS_NR] = {
@@ -669,21 +686,25 @@ static void fimd_win_set_pixfmt(struct fimd_context *ctx, unsigned int win,
 		val |= WINCONx_BYTSWP;
 		break;
 	case DRM_FORMAT_XRGB1555:
+	case DRM_FORMAT_XBGR1555:
 		val |= WINCON0_BPPMODE_16BPP_1555;
 		val |= WINCONx_HAWSWP;
 		val |= WINCONx_BURSTLEN_16WORD;
 		break;
 	case DRM_FORMAT_RGB565:
+	case DRM_FORMAT_BGR565:
 		val |= WINCON0_BPPMODE_16BPP_565;
 		val |= WINCONx_HAWSWP;
 		val |= WINCONx_BURSTLEN_16WORD;
 		break;
 	case DRM_FORMAT_XRGB8888:
+	case DRM_FORMAT_XBGR8888:
 		val |= WINCON0_BPPMODE_24BPP_888;
 		val |= WINCONx_WSWP;
 		val |= WINCONx_BURSTLEN_16WORD;
 		break;
 	case DRM_FORMAT_ARGB8888:
+	case DRM_FORMAT_ABGR8888:
 	default:
 		val |= WINCON1_BPPMODE_25BPP_A1888;
 		val |= WINCONx_WSWP;
@@ -1066,8 +1087,13 @@ static int fimd_bind(struct device *dev, struct device *master, void *data)
 	ctx->drm_dev = drm_dev;
 
 	for (i = 0; i < WINDOWS_NR; i++) {
-		ctx->configs[i].pixel_formats = fimd_formats;
-		ctx->configs[i].num_pixel_formats = ARRAY_SIZE(fimd_formats);
+        if (pixel_order == FIMD_OUTPUT_BGR && !ctx->i80_if) {
+            ctx->configs[i].pixel_formats = fimd_bgr_formats;
+            ctx->configs[i].num_pixel_formats = ARRAY_SIZE(fimd_bgr_formats);
+        } else {
+            ctx->configs[i].pixel_formats = fimd_rgb_formats;
+            ctx->configs[i].num_pixel_formats = ARRAY_SIZE(fimd_rgb_formats);
+        }
 		ctx->configs[i].zpos = i;
 		ctx->configs[i].type = fimd_win_types[i];
 		ctx->configs[i].capabilities = capabilities[i];
@@ -1169,6 +1195,9 @@ static int fimd_probe(struct platform_device *pdev)
 		ctx->i80ifcon |= LCD_WR_HOLD(val);
 	}
 	of_node_put(i80_if_timings);
+
+    if (pixel_order == FIMD_OUTPUT_BGR && !ctx->i80_if)
+        ctx->vidcon0 |= VIDCON0_PNRMODE_BGR;
 
 	ctx->sysreg = syscon_regmap_lookup_by_phandle(dev->of_node,
 							"samsung,sysreg");
