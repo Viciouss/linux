@@ -3266,6 +3266,37 @@ static const struct panel_desc samsung_lsn122dl01_c01 = {
 	},
 };
 
+static const struct display_timing samsung_ltl101al01_timing = {
+	.pixelclock = {66663000, 66663000, 66663000},
+	.hactive = {1280, 1280, 1280},
+	.hfront_porch = {18, 18, 18},
+	.hback_porch = {36, 36, 36},
+	.hsync_len = {16, 16, 16},
+	.vactive = {800, 800, 800},
+	.vfront_porch = {4, 4, 4},
+	.vback_porch = {16, 16, 16},
+	.vsync_len = {3, 3, 3},
+	.flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW,
+};
+
+static const struct panel_desc samsung_ltl101al01 = {
+	.timings = &samsung_ltl101al01_timing,
+	.num_timings = 1,
+	.bpc = 6,
+	.size = {
+		.width = 217,
+		.height = 135,
+	},
+	.delay = {
+		.prepare = 70,
+		.enable = 320,
+		.disable = 220,
+		.unprepare = 70,
+	},
+	.bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG,
+	.connector_type = DRM_MODE_CONNECTOR_LVDS,
+};
+
 static const struct drm_display_mode samsung_ltn101nt05_mode = {
 	.clock = 54030,
 	.hdisplay = 1024,
@@ -4213,6 +4244,9 @@ static const struct of_device_id platform_of_match[] = {
 	}, {
 		.compatible = "samsung,lsn122dl01-c01",
 		.data = &samsung_lsn122dl01_c01,
+	}, {
+		.compatible = "samsung,ltl101al01",
+		.data = &samsung_ltl101al01,
 	}, {
 		.compatible = "samsung,ltn101nt05",
 		.data = &samsung_ltn101nt05,
