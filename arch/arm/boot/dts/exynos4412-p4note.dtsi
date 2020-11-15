@@ -105,6 +105,16 @@
 		regulator-always-on;
 	};
 
+	panel_vdd: voltage-regulator-4 {
+		compatible = "regulator-fixed";
+		regulator-name = "LCD_ENABLE";
+		pinctrl-names = "default";
+		pinctrl-0 = <&lcd_enable>;
+		gpios = <&gpc0 1 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+	};
+
 	wlan_pwrseq: sdhci3-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		reset-gpios = <&gpm3 5 GPIO_ACTIVE_LOW>;
@@ -181,6 +191,32 @@
 				st,norequest-mask = <0x2F>;
 			};
 		};
+	};
+
+	panel {
+		compatible = "samsung,ltl101al01";
+		pinctrl-0 = <&lvds_nshdn>;
+		pinctrl-names = "default";
+		power-supply = <&panel_vdd>;
+		enable-gpios = <&gpm0 5 GPIO_ACTIVE_HIGH>;
+		backlight = <&backlight>;
+
+		port {
+			lcd_ep: endpoint {
+				remote-endpoint = <&fimd_ep>;
+			};
+		};
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pinctrl-0 = <&led_bl_reset>;
+		pinctrl-names = "default";
+		enable-gpios = <&gpm0 1 GPIO_ACTIVE_HIGH>;
+		pwms = <&pwm 1 78770 0>;
+		brightness-levels = <0 48 128 255>;
+		num-interpolated-steps = <8>;
+		default-brightness-level = <12>;
 	};
 };
 
@@ -261,22 +297,19 @@
 };
 
 &fimd {
-	pinctrl-0 = <&lcd_clk &lcd_data24 &pwm1_out>;
+	pinctrl-0 = <&lcd_clk &lcd_data24>;
 	pinctrl-names = "default";
+	#address-cells = <1>;
+	#size-cells = <0>;
 	status = "okay";
 
-	display-timings {
-		timing0 {
-			clock-frequency = <66666666>;
-			hactive = <1280>;
-			vactive = <800>;
-			hfront-porch = <18>;
-			hback-porch = <36>;
-			hsync-len = <16>;
-			vback-porch = <16>;
-			vfront-porch = <4>;
-			vsync-len = <3>;
-			hsync-active = <1>;
+	samsung,invert-vclk;
+
+	port@3 {
+		reg = <3>;
+
+		fimd_ep: endpoint {
+			remote-endpoint = <&lcd_ep>;
 		};
 	};
 };
@@ -653,6 +686,12 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
+	lcd_enable: lcd-enable-pins {
+		samsung,pins = "gpc0-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
 	sleep0: sleep-states {
 		PIN_SLP(gpa0-0, INPUT, NONE);
 		PIN_SLP(gpa0-1, OUT0, NONE);
@@ -775,13 +814,25 @@
 		/* 0 = CP, 1 = AP (serial output) */
 	};
 
-	tsp_rst: tsp-rst {
+	led_bl_reset: led-bl-reset-pins {
+		samsung,pins = "gpm0-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	tsp_rst: tsp-rst-pins {
 		samsung,pins = "gpm0-4";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
-	tsp_irq: tsp-irq {
+	lvds_nshdn: lvds-nshdn-pins {
+		samsung,pins = "gpm0-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	tsp_irq: tsp-irq-pins {
 		samsung,pins = "gpm2-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
@@ -1064,6 +1115,13 @@
 &pmu_system_controller {
 	assigned-clocks = <&pmu_system_controller 0>;
 	assigned-clock-parents = <&clock CLK_XUSBXTI>;
+};
+
+&pwm {
+	pinctrl-0 = <&pwm1_out>;
+	pinctrl-names = "default";
+	samsung,pwm-outputs = <1>;
+	status = "okay";
 };
 
 &rtc {
