@@ -439,6 +439,195 @@ static const struct iio_trigger_ops st_gyro_trigger_ops = {
 #define ST_GYRO_TRIGGER_OPS NULL
 #endif
 
+#if defined(CONFIG_ACPI) || defined(CONFIG_OF)
+static const struct iio_mount_matrix *
+get_mount_matrix(const struct iio_dev *indio_dev,
+		 const struct iio_chan_spec *chan)
+{
+	struct st_sensor_data *adata = iio_priv(indio_dev);
+
+	return adata->mount_matrix;
+}
+
+static const struct iio_chan_spec_ext_info mount_matrix_ext_info[] = {
+	IIO_MOUNT_MATRIX(IIO_SHARED_BY_ALL, get_mount_matrix),
+	{ },
+};
+#endif
+
+#ifdef CONFIG_ACPI
+/* Read ST-specific _ONT orientation data from ACPI and generate an
+ * appropriate mount matrix.
+ */
+static int apply_orientation(struct iio_dev *indio_dev,
+			     struct iio_chan_spec *channels)
+{
+	struct st_sensor_data *adata = iio_priv(indio_dev);
+	struct acpi_buffer buffer = {ACPI_ALLOCATE_BUFFER, NULL};
+	struct acpi_device *adev;
+	union acpi_object *ont;
+	union acpi_object *elements;
+	acpi_status status;
+	int ret = -EINVAL;
+	unsigned int val;
+	int i, j;
+	int final_ont[3][3] = { { 0 }, };
+
+	/* For some reason, ST's _ONT translation does not apply directly
+	 * to the data read from the sensor. Another translation must be
+	 * performed first, as described by the matrix below. Perhaps
+	 * ST required this specific translation for the first product
+	 * where the device was mounted?
+	 */
+	const int default_ont[3][3] = {
+		{  0,  1,  0 },
+		{ -1,  0,  0 },
+		{  0,  0, -1 },
+	};
+
+
+	adev = ACPI_COMPANION(adata->dev);
+	if (!adev)
+		return 0;
+
+	/* Read _ONT data, which should be a package of 6 integers. */
+	status = acpi_evaluate_object(adev->handle, "_ONT", NULL, &buffer);
+	if (status == AE_NOT_FOUND) {
+		return 0;
+	} else if (ACPI_FAILURE(status)) {
+		dev_warn(&indio_dev->dev, "failed to execute _ONT: %d\n",
+			 status);
+		return status;
+	}
+
+	ont = buffer.pointer;
+	if (ont->type != ACPI_TYPE_PACKAGE || ont->package.count != 6)
+		goto out;
+
+	/* The first 3 integers provide axis order information.
+	 * e.g. 0 1 2 would indicate normal X,Y,Z ordering.
+	 * e.g. 1 0 2 indicates that data arrives in order Y,X,Z.
+	 */
+	elements = ont->package.elements;
+	for (i = 0; i < 3; i++) {
+		if (elements[i].type != ACPI_TYPE_INTEGER)
+			goto out;
+
+		val = elements[i].integer.value;
+		if (val > 2)
+			goto out;
+
+		/* Avoiding full matrix multiplication, we simply reorder the
+		 * columns in the default_ont matrix according to the
+		 * ordering provided by _ONT.
+		 */
+		final_ont[0][i] = default_ont[0][val];
+		final_ont[1][i] = default_ont[1][val];
+		final_ont[2][i] = default_ont[2][val];
+	}
+
+	/* The final 3 integers provide sign flip information.
+	 * 0 means no change, 1 means flip.
+	 * e.g. 0 0 1 means that Z data should be sign-flipped.
+	 * This is applied after the axis reordering from above.
+	 */
+	elements += 3;
+	for (i = 0; i < 3; i++) {
+		if (elements[i].type != ACPI_TYPE_INTEGER)
+			goto out;
+
+		val = elements[i].integer.value;
+		if (val != 0 && val != 1)
+			goto out;
+		if (!val)
+			continue;
+
+		/* Flip the values in the indicated column */
+		final_ont[0][i] *= -1;
+		final_ont[1][i] *= -1;
+		final_ont[2][i] *= -1;
+	}
+
+	/* Convert our integer matrix to a string-based iio_mount_matrix */
+	adata->mount_matrix = devm_kmalloc(&indio_dev->dev,
+					   sizeof(*adata->mount_matrix),
+					   GFP_KERNEL);
+	if (!adata->mount_matrix) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	for (i = 0; i < 3; i++) {
+		for (j = 0; j < 3; j++) {
+			int matrix_val = final_ont[i][j];
+			char *str_value;
+
+			switch (matrix_val) {
+			case -1:
+				str_value = "-1";
+				break;
+			case 0:
+				str_value = "0";
+				break;
+			case 1:
+				str_value = "1";
+				break;
+			default:
+				goto out;
+			}
+			adata->mount_matrix->rotation[i * 3 + j] = str_value;
+		}
+	}
+
+	/* Expose the mount matrix via ext_info */
+	for (i = 0; i < indio_dev->num_channels; i++)
+		channels[i].ext_info = mount_matrix_ext_info;
+
+	ret = 0;
+	dev_info(&indio_dev->dev, "computed mount matrix from ACPI\n");
+
+out:
+	kfree(buffer.pointer);
+	return ret;
+}
+#elif defined(CONFIG_OF)
+static int apply_orientation(struct iio_dev *indio_dev,
+				  struct iio_chan_spec *channels)
+{
+	struct st_sensor_data *adata = iio_priv(indio_dev);
+	struct device *dev = adata->dev;
+	int ret = -EINVAL;
+	int i;
+
+	adata->mount_matrix = devm_kmalloc(dev,
+					   sizeof(*adata->mount_matrix),
+					   GFP_KERNEL);
+	if (!adata->mount_matrix) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	ret = iio_read_mount_matrix(dev, "mount-matrix", adata->mount_matrix);
+	if (ret) {
+		dev_err(dev, "error reading mount-matrix");
+		goto out;
+	}
+
+	/* Expose the mount matrix via ext_info */
+	for (i = 0; i < indio_dev->num_channels; i++)
+		channels[i].ext_info = mount_matrix_ext_info;
+
+out:
+	return ret;
+}
+#else
+static int apply_orientation(struct iio_dev *indio_dev,
+				  struct iio_chan_spec *channels)
+{
+	return 0;
+}
+#endif
+
 /*
  * st_gyro_get_settings() - get sensor settings from device name
  * @name: device name buffer reference.
@@ -480,6 +669,10 @@ int st_gyro_common_probe(struct iio_dev *indio_dev)
 
 	gdata->current_fullscale = &gdata->sensor_settings->fs.fs_avl[0];
 	gdata->odr = gdata->sensor_settings->odr.odr_avl[0].hz;
+
+	if (apply_orientation(indio_dev, gdata->sensor_settings->ch))
+		dev_warn(&indio_dev->dev,
+			 "failed to apply orientation data: %d\n", err);
 
 	pdata = (struct st_sensors_platform_data *)&gyro_pdata;
 
