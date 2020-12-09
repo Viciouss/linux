@@ -1259,6 +1259,29 @@
 &pmu_system_controller {
 	assigned-clocks = <&pmu_system_controller 0>;
 	assigned-clock-parents = <&clock CLK_XUSBXTI>;
+
+	/* S-Boot 4.0 */
+	#define S5P_INFORM2		0xF008
+	#define S5P_INFORM3		0x080C
+	#define BOOT_MODE_PREFIX	0x12345670
+	#define BOOT_NORMAL		(BOOT_MODE_PREFIX | 0)
+	#define BOOT_DOWNLOAD		(BOOT_MODE_PREFIX | 1)
+	#define BOOT_RECOVERY		(BOOT_MODE_PREFIX | 4)
+
+	no-lpm-mode {
+		compatible = "syscon-reboot";
+		offset = <S5P_INFORM2>;
+		value = <0x12345678>;
+	};
+
+	reboot-mode {
+		compatible = "syscon-reboot-mode";
+		offset = <S5P_INFORM3>;
+		mode-normal = <BOOT_NORMAL>;
+		mode-recovery = <BOOT_RECOVERY>;
+		mode-bootloader = <BOOT_DOWNLOAD>;
+		mode-download = <BOOT_DOWNLOAD>;
+	};
 };
 
 &pwm {
@@ -1315,7 +1338,7 @@
 		pinctrl-0 = <&bt_shutdown &bt_device_wakeup &bt_host_wakeup>;
 		pinctrl-names = "default";
 
-		max-speed = <2000000>;
+		max-speed = <4000000>;
 		shutdown-gpios = <&gpl0 6 GPIO_ACTIVE_HIGH>;
 		device-wakeup-gpios = <&gpx3 1 GPIO_ACTIVE_HIGH>;
 		host-wakeup-gpios = <&gpx2 6 GPIO_ACTIVE_HIGH>;
