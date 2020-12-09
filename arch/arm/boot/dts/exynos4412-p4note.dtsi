@@ -257,8 +257,8 @@
 		pinctrl-names = "default";
 		enable-gpios = <&gpm0 1 GPIO_ACTIVE_HIGH>;
 		pwms = <&pwm 1 32768 0>;
-		brightness-levels = <0 48 56 64 72 80 96 112 128 144 160 176 192 255>;
-		default-brightness-level = <12>;
+		brightness-levels = <0 4 8 12 16 20 24 32 40 48 56 64 72 80 88 96 104 112 120 128 255>;
+		default-brightness-level = <2>;
 	};
 
 	sound: sound {
@@ -1338,7 +1338,7 @@
 		pinctrl-0 = <&bt_shutdown &bt_device_wakeup &bt_host_wakeup>;
 		pinctrl-names = "default";
 
-		max-speed = <4000000>;
+		max-speed = <2000000>;
 		shutdown-gpios = <&gpl0 6 GPIO_ACTIVE_HIGH>;
 		device-wakeup-gpios = <&gpx3 1 GPIO_ACTIVE_HIGH>;
 		host-wakeup-gpios = <&gpx2 6 GPIO_ACTIVE_HIGH>;
