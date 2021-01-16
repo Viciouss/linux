@@ -173,7 +173,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		fuel-gauge@36 {
+		battery: fuel-gauge@36 {
 			compatible = "maxim,max17042";
 			reg = <0x36>;
 			pinctrl-0 = <&fuel_alert_irq>;
@@ -236,6 +236,8 @@
 			summit,fast-voltage-threshold-microvolt = <2600000>;
 			summit,chip-temperature-threshold-celsius = <130>;
 			summit,usb-current-limit-microamp = <2200000>;
+
+			monitored-battery = <&battery>;
 		};
 	};
 
@@ -261,7 +263,7 @@
 		enable-gpios = <&gpm0 1 GPIO_ACTIVE_HIGH>;
 		pwms = <&pwm 1 32768 0>;
 		brightness-levels = <0 4 8 12 16 20 24 32 40 48 56 64 72 80 88 96 104 112 120 128 255>;
-		default-brightness-level = <2>;
+		default-brightness-level = <5>;
 	};
 
 	sound: sound {
