@@ -14,6 +14,6 @@
 	compatible = "samsung,n8010", "samsung,p4note", "samsung,exynos4412", "samsung,exynos4";
 
 	chosen {
-		bootargs = "root=/dev/mmcblk2p9 rw init=/init androidboot.selinux=permissive androidboot.hardware=smdk4x12 exynosdrm.pixel_order=1";
+		bootargs = "root=/dev/ram0 rw ramdisk=8192 initrd=0x42000000,8M init=/init androidboot.selinux=permissive androidboot.hardware=smdk4x12 exynosdrm.pixel_order=1";
 	};
 };
