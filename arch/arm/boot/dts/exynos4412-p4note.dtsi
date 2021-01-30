@@ -1315,7 +1315,7 @@
 	assigned-clock-parents = <&clock CLK_XUSBXTI>;
 
 	/* S-Boot 4.0 */
-	#define S5P_INFORM2		0xF008
+	#define S5P_INFORM2		0x0808
 	#define S5P_INFORM3		0x080C
 	#define BOOT_MODE_PREFIX	0x12345670
 	#define BOOT_NORMAL		(BOOT_MODE_PREFIX | 0)
