@@ -602,14 +602,15 @@ static void fimd_win_set_bldmod(struct fimd_context *ctx, unsigned int win,
 	u32 win_alpha_h = alpha >> 12;
 	u32 val = 0;
 
+	val |= WINCON1_ALPHA_SEL;
+	val |= WINCON1_BLD_PIX;
+
 	switch (pixel_alpha) {
 	case DRM_MODE_BLEND_PIXEL_NONE:
 		break;
 	case DRM_MODE_BLEND_COVERAGE:
 	case DRM_MODE_BLEND_PREMULTI:
 	default:
-		val |= WINCON1_ALPHA_SEL;
-		val |= WINCON1_BLD_PIX;
 		val |= WINCON1_ALPHA_MUL;
 		break;
 	}
