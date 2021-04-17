@@ -7,7 +7,9 @@
  * Author(s): Amelie Delaunay <amelie.delaunay@st.com>
  */
 
+#include <linux/extcon.h>
 #include <linux/iopoll.h>
+#include <linux/of_graph.h>
 #include <linux/platform_device.h>
 #include <linux/usb/role.h>
 #include "core.h"
@@ -66,9 +68,8 @@ static int dwc2_ovr_bvalid(struct dwc2_hsotg *hsotg, bool valid)
 	return 0;
 }
 
-static int dwc2_drd_role_sw_set(struct usb_role_switch *sw, enum usb_role role)
+static int dwc2_drd_set_role(struct dwc2_hsotg *hsotg, enum usb_role role)
 {
-	struct dwc2_hsotg *hsotg = usb_role_switch_get_drvdata(sw);
 	unsigned long flags;
 	int already = 0;
 
@@ -117,29 +118,137 @@ static int dwc2_drd_role_sw_set(struct usb_role_switch *sw, enum usb_role role)
 	return 0;
 }
 
+static int dwc2_drd_role_sw_set(struct usb_role_switch *sw, enum usb_role role)
+{
+	struct dwc2_hsotg *hsotg = usb_role_switch_get_drvdata(sw);
+
+	return dwc2_drd_set_role(hsotg, role);
+}
+
+static void dwc2_set_role_worker(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct dwc2_hsotg *hsotg =
+		container_of(dwork, struct dwc2_hsotg, edev_work);
+
+	dev_info(hsotg->dev, "Updating current state: %s",
+		 hsotg->new_role == USB_ROLE_HOST ? "Host" : "Device");
+	dwc2_drd_set_role(hsotg, hsotg->new_role);
+}
+
+static int dwc2_drd_notifier(struct notifier_block *nb,
+			     unsigned long event, void *ptr)
+{
+	struct dwc2_hsotg *hsotg = container_of(nb, struct dwc2_hsotg, edev_nb);
+	enum usb_role role = event ?
+		      USB_ROLE_HOST :
+		      USB_ROLE_DEVICE;
+
+	hsotg->new_role = role;
+
+	cancel_delayed_work(&hsotg->edev_work);
+	schedule_delayed_work(&hsotg->edev_work, msecs_to_jiffies(10));
+
+	return NOTIFY_DONE;
+}
+
+static void dwc2_drd_update(struct dwc2_hsotg *hsotg)
+{
+	int id;
+	enum usb_role role;
+
+	if (hsotg->edev) {
+		id = extcon_get_state(hsotg->edev, EXTCON_USB_HOST);
+		if (id < 0)
+			id = 0;
+		role = id ?
+			USB_ROLE_HOST :
+			USB_ROLE_DEVICE;
+
+		hsotg->new_role = role;
+		schedule_delayed_work(&hsotg->edev_work, msecs_to_jiffies(10));
+	}
+}
+
+static struct extcon_dev *dwc2_get_extcon(struct dwc2_hsotg *hsotg)
+{
+	struct device *dev = hsotg->dev;
+	struct device_node *np_phy, *np_conn;
+	struct extcon_dev *edev;
+	const char *name;
+
+	if (device_property_read_bool(dev, "extcon"))
+		return extcon_get_edev_by_phandle(dev, 0);
+
+	/*
+	 * Device tree platforms should get extcon via phandle.
+	 * On ACPI platforms, we get the name from a device property.
+	 * This device property is for kernel internal use only and
+	 * is expected to be set by the glue code.
+	 */
+	if (device_property_read_string(dev, "linux,extcon-name", &name) == 0) {
+		edev = extcon_get_extcon_dev(name);
+		if (!edev)
+			return ERR_PTR(-EPROBE_DEFER);
+
+		return edev;
+	}
+
+	np_phy = of_parse_phandle(dev->of_node, "phys", 0);
+	np_conn = of_graph_get_remote_node(np_phy, -1, -1);
+
+	if (np_conn)
+		edev = extcon_find_edev_by_node(np_conn);
+	else
+		edev = NULL;
+
+	of_node_put(np_conn);
+	of_node_put(np_phy);
+
+	return edev;
+}
+
 int dwc2_drd_init(struct dwc2_hsotg *hsotg)
 {
 	struct usb_role_switch_desc role_sw_desc = {0};
 	struct usb_role_switch *role_sw;
 	int ret;
 
-	if (!device_property_read_bool(hsotg->dev, "usb-role-switch"))
+	hsotg->edev = dwc2_get_extcon(hsotg);
+	if (IS_ERR(hsotg->edev))
+		return PTR_ERR(hsotg->edev);
+
+	if (device_property_read_bool(hsotg->dev, "usb-role-switch")) {
+		role_sw_desc.driver_data = hsotg;
+		role_sw_desc.fwnode = dev_fwnode(hsotg->dev);
+		role_sw_desc.set = dwc2_drd_role_sw_set;
+		role_sw_desc.allow_userspace_control = true;
+
+		role_sw = usb_role_switch_register(hsotg->dev, &role_sw_desc);
+		if (IS_ERR(role_sw)) {
+			ret = PTR_ERR(role_sw);
+			dev_err(hsotg->dev,
+				"failed to register role switch: %d\n", ret);
+			return ret;
+		}
+
+		hsotg->role_sw = role_sw;
+	} else if (hsotg->edev) {
+		hsotg->edev_nb.notifier_call = dwc2_drd_notifier;
+		ret = devm_extcon_register_notifier(hsotg->dev, hsotg->edev, EXTCON_USB_HOST,
+						    &hsotg->edev_nb);
+		if (ret < 0) {
+			dev_err(hsotg->dev, "couldn't register cable notifier\n");
+			return ret;
+		}
+
+		INIT_DELAYED_WORK(&hsotg->edev_work, dwc2_set_role_worker);
+		dwc2_drd_update(hsotg);
+
+		dev_info(hsotg->dev, "Successfully registered extcon device");
+	} else {
 		return 0;
-
-	role_sw_desc.driver_data = hsotg;
-	role_sw_desc.fwnode = dev_fwnode(hsotg->dev);
-	role_sw_desc.set = dwc2_drd_role_sw_set;
-	role_sw_desc.allow_userspace_control = true;
-
-	role_sw = usb_role_switch_register(hsotg->dev, &role_sw_desc);
-	if (IS_ERR(role_sw)) {
-		ret = PTR_ERR(role_sw);
-		dev_err(hsotg->dev,
-			"failed to register role switch: %d\n", ret);
-		return ret;
 	}
-
-	hsotg->role_sw = role_sw;
 
 	/* Enable override and initialize values */
 	dwc2_ovr_init(hsotg);
