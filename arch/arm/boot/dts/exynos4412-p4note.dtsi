@@ -454,9 +454,18 @@
 };
 
 &hsotg {
+	vusb_d-supply = <&ldo15_reg>;
 	vusb_a-supply = <&ldo12_reg>;
-	dr_mode = "peripheral";
+	dr_mode = "otg";
+	extcon = <&extcon_p4note>;
+	disable-over-current;
 	status = "okay";
+};
+
+&ehci {
+	status = "okay";
+	phys = <&exynos_usbphy 1>;
+	phy-names = "host";
 };
 
 &i2c_1 {
