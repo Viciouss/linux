@@ -305,18 +305,16 @@
 			"LINE", "LINEOUT2N",
 			"LINE", "LINEOUT2P",
 
-			"HDMI", "LINEOUT1N",
-			"HDMI", "LINEOUT1P",
-
-			/* "IN1LP", "MICBIAS1",
+			"IN1LP", "MICBIAS1",
 			"IN1LN", "MICBIAS1",
-			"MICBIAS1", "Main Mic", */
+			"Main Mic", "MICBIAS1",
 
-			"IN1RP", "Sub Mic",
-			"IN1RN", "Sub Mic",
-
-			/* "IN2LP:VXRN", "MICBIAS2",
-			"MICBIAS2", "Headset Mic", */
+			"IN2LP:VXRN", "MICBIAS2",
+			"Headset Mic", "MICBIAS2",
+			
+			"AIF1DAC1L", "S5P RP",
+			"AIF1DAC1R", "S5P RP";
+	};
 
 	battery_cell: battery-cell {
 		compatible = "simple-battery";
