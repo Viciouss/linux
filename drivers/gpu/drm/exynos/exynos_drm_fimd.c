@@ -221,7 +221,9 @@ static const enum drm_plane_type fimd_win_types[WINDOWS_NR] = {
 static const uint32_t fimd_formats[] = {
 	DRM_FORMAT_C8,
 	DRM_FORMAT_XRGB1555,
+	DRM_FORMAT_XBGR1555,
 	DRM_FORMAT_RGB565,
+	DRM_FORMAT_BGR565,
 	DRM_FORMAT_XRGB8888,
 	DRM_FORMAT_ARGB8888,
 	DRM_FORMAT_XBGR8888,
@@ -691,6 +693,18 @@ static void fimd_win_set_pixfmt(struct fimd_context *ctx, unsigned int win,
 		val |= WINCON1_BPPMODE_25BPP_A1888;
 		val |= WINCONx_WSWP;
 		val |= WINCONx_BURSTLEN_16WORD;
+		break;
+	}
+
+	switch (pixel_format) {
+	case DRM_FORMAT_XBGR1555:
+	case DRM_FORMAT_XBGR8888:
+	case DRM_FORMAT_ABGR8888:
+	case DRM_FORMAT_BGR565:
+		writel(WIN_RGB_ORDER_REVERSE, ctx->regs + WIN_RGB_ORDER(win));
+		break;
+	default:
+		writel(WIN_RGB_ORDER_FORWARD, ctx->regs + WIN_RGB_ORDER(win));
 		break;
 	}
 
