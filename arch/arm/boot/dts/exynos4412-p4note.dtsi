@@ -225,7 +225,7 @@
 			st,ref-sel = <0>;
 			st,sample-time = <3>;
 
-			stmpe_adc {
+			stmpe_adc: stmpe_adc {
 				compatible = "st,stmpe-adc";
 				#io-channel-cells = <1>;
 				st,norequest-mask = <0x2F>;
@@ -324,9 +324,30 @@
 		constant-charge-voltage-max-microvolt = <4200000>;
 	};
 
-			/* "IN2RN", "Third Mic",
-			"IN2RP:VXRP", "Third Mic"; */
+	extcon_p4note: external-connector {
+		compatible = "extcon,p4note";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&accessory_int &dock_int &charger_int
+			     &usb_sel &usb_acc_en &usb_acc_5v>;
+
+		io-channels = <&stmpe_adc 0>, <&stmpe_adc 1>, <&stmpe_adc 2>;
+		io-channel-names = "headphone", "charger", "accessory";
+
+		acc-gpios = <&gpx0 4 GPIO_ACTIVE_LOW>;
+		dock-gpios = <&gpx1 3 GPIO_ACTIVE_LOW>;
+		charger-gpios = <&gpx1 4 GPIO_ACTIVE_HIGH>;
+
+		usb0-gpios = <&gpy0 4 GPIO_ACTIVE_HIGH>;
+		usb1-gpios = <&gpy0 5 GPIO_ACTIVE_HIGH>;
+		cp-gpios = <&gpm0 7 GPIO_ACTIVE_HIGH>;
+		
+		uart1-gpios = <&gpl2 7 GPIO_ACTIVE_HIGH>;
+
+		acc_en-gpios = <&gpl2 6 GPIO_ACTIVE_HIGH>;
+		acc_5v-gpios = <&gpx3 5 GPIO_ACTIVE_HIGH>;
 	};
+
 };
 
 &adc {
@@ -1002,11 +1023,18 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
 	};
 
+	usb_acc_en: usb-acc-en {
+		samsung,pins = "gpl2-6";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
 	uart_sel: uart-sel {
 		samsung,pins = "gpl2-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
-		samsung,pin-val = <1>;
+		// samsung,pin-val = <1>;
 		/* 0 = CP, 1 = AP (serial output) */
 	};
 
@@ -1046,6 +1074,12 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
+	ta_enable: ta-enable {
+		samsung,pins = "gpm4-2";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
 	wm1811_ldo: wm1811-ldo {
 		samsung,pins = "gpm4-4";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
@@ -1076,6 +1110,13 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
+	accessory_int: accessory-int {
+		samsung,pins = "gpx0-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
 	gyro_int: gyro-int {
 		samsung,pins = "gpx0-6";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
@@ -1085,6 +1126,20 @@
 	max77686_irq: max77686-irq {
 		samsung,pins = "gpx0-7";
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	dock_int: dock-int {
+		samsung,pins = "gpx1-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	charger_int: charger-int {
+		samsung,pins = "gpx1-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
 	};
 
 	gpio_keys: gpio-keys {
@@ -1118,6 +1173,19 @@
 
 	sdhci2_cd: sdhci2-cd {
 		samsung,pins = "gpx3-4";
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	usb_acc_5v: usb-acc-5v {
+		samsung,pins = "gpx3-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	usb_sel: usb-sel {
+		samsung,pins = "gpy0-4", "gpy0-5", "gpm0-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
