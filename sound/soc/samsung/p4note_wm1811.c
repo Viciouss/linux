@@ -32,11 +32,64 @@
 #define CODEC_DEFAULT_SYNC_CLK 11289600
 
 struct p4note_machine_priv {
+	struct device *dev;
 	struct snd_soc_codec *codec;
 	struct clk *codec_mclk1;
 	struct regulator *reg_mic_bias;
 	struct gpio_desc *gpio_lineout_sel;
 	unsigned int fll1_rate;
+	int aif2_mode;
+	int kpcs_mode;
+	int input_clamp;
+	int lineout_mode;
+	int aif2_digital_mute;
+	struct wm8958_micd_rate *rates;
+	int num_rates;
+};
+
+const char *aif2_mode_text[] = {
+	"Slave", "Master"
+};
+
+const char *kpcs_mode_text[] = {
+	"Off", "On"
+};
+
+const char *input_clamp_text[] = {
+	"Off", "On"
+};
+
+const char *lineout_mode_text[] = {
+	"Off", "On"
+};
+
+const char *switch_mode_text[] = {
+	"Off", "On"
+};
+
+static const struct soc_enum aif2_mode_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(aif2_mode_text),
+			    aif2_mode_text),
+};
+
+static const struct soc_enum kpcs_mode_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(kpcs_mode_text),
+			    kpcs_mode_text),
+};
+
+static const struct soc_enum input_clamp_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(input_clamp_text),
+			    input_clamp_text),
+};
+
+static const struct soc_enum lineout_mode_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(lineout_mode_text),
+			    lineout_mode_text),
+};
+
+static const struct soc_enum switch_mode_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(switch_mode_text),
+			    switch_mode_text),
 };
 
 static int p4note_start_fll1(struct snd_soc_pcm_runtime *rtd, unsigned int new_rate)
@@ -119,6 +172,228 @@ static struct snd_soc_ops p4note_aif1_ops = {
 	.hw_params = p4note_aif1_hw_params,
 };
 
+static int p4note_aif2_hw_params(struct snd_pcm_substream *substream,
+					struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd	= substream->private_data;
+	struct snd_soc_dai *aif2_dai = asoc_rtd_to_codec(rtd, 1);
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 1);
+	struct snd_soc_card *card = cpu_dai->component->card;
+	struct p4note_machine_priv *priv = snd_soc_card_get_drvdata(card);
+	int ret;
+	int prate;
+	int bclk;
+
+	dev_info(aif2_dai->dev, "%s ++\n", __func__);
+	prate = params_rate(params);
+	switch (params_rate(params)) {
+	case 8000:
+	case 16000:
+		break;
+	default:
+		dev_warn(aif2_dai->dev, "Unsupported LRCLK %d, falling back to 8000Hz\n",
+				(int)params_rate(params));
+		prate = 8000;
+	}
+
+	/* Set the codec DAI configuration, aif2_mode:0 is slave */
+	if (priv->aif2_mode == 0)
+		ret = snd_soc_dai_set_fmt(aif2_dai, SND_SOC_DAIFMT_I2S
+					| SND_SOC_DAIFMT_NB_NF
+					| SND_SOC_DAIFMT_CBS_CFS);
+	else
+		ret = snd_soc_dai_set_fmt(aif2_dai, SND_SOC_DAIFMT_I2S
+					| SND_SOC_DAIFMT_NB_NF
+					| SND_SOC_DAIFMT_CBM_CFM);
+
+	if (ret < 0)
+		return ret;
+
+	switch (prate) {
+	case 8000:
+		bclk = 256000;
+		break;
+	case 16000:
+		bclk = 512000;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (priv->aif2_mode == 0) {
+		ret = snd_soc_dai_set_pll(aif2_dai, WM8994_FLL2,
+					WM8994_FLL_SRC_BCLK,
+					bclk, prate * 256);
+	} else {
+		ret = snd_soc_dai_set_pll(aif2_dai, WM8994_FLL2,
+					  WM8994_FLL_SRC_MCLK1,
+					  XTAL_24MHZ_AP, prate * 256);
+	}
+
+	if (ret < 0)
+		dev_err(aif2_dai->dev, "Unable to configure FLL2: %d\n", ret);
+
+	ret = snd_soc_dai_set_sysclk(aif2_dai, WM8994_SYSCLK_FLL2,
+				     prate * 256, SND_SOC_CLOCK_IN);
+	if (ret < 0)
+		dev_err(aif2_dai->dev, "Unable to switch to FLL2: %d\n", ret);
+
+	if (!(snd_soc_component_read(aif2_dai->component, WM8994_INTERRUPT_RAW_STATUS_2)
+		& WM8994_FLL2_LOCK_STS)) {
+		dev_info(aif2_dai->dev, "%s: use mclk1 for FLL2\n", __func__);
+		ret = snd_soc_dai_set_pll(aif2_dai, WM8994_FLL2,
+			WM8994_FLL_SRC_MCLK1,
+			XTAL_24MHZ_AP, prate * 256);
+	}
+
+	dev_info(aif2_dai->dev, "%s --\n", __func__);
+	return 0;
+}
+
+static struct snd_soc_ops p4note_aif2_ops = {
+	.hw_params = p4note_aif2_hw_params,
+};
+
+static int get_aif2_mode(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = priv->aif2_mode;
+	return 0;
+}
+
+static int set_aif2_mode(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	if (priv->aif2_mode == ucontrol->value.integer.value[0])
+		return 0;
+
+	priv->aif2_mode = ucontrol->value.integer.value[0];
+
+	dev_info(priv->dev, "set aif2 mode : %s\n", aif2_mode_text[priv->aif2_mode]);
+
+	return 0;
+}
+
+static int get_kpcs_mode(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = priv->kpcs_mode;
+	return 0;
+}
+
+static int set_kpcs_mode(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	priv->kpcs_mode = ucontrol->value.integer.value[0];
+
+	dev_info(priv->dev, "set kpcs mode : %d\n", priv->kpcs_mode);
+
+	return 0;
+}
+
+static int get_input_clamp(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = priv->input_clamp;
+	return 0;
+}
+
+static int set_input_clamp(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	priv->input_clamp = ucontrol->value.integer.value[0];
+
+	if (priv->input_clamp) {
+		snd_soc_component_update_bits(component, WM8994_INPUT_MIXER_1,
+				WM8994_INPUTS_CLAMP, WM8994_INPUTS_CLAMP);
+		msleep(100);
+	} else {
+		snd_soc_component_update_bits(component, WM8994_INPUT_MIXER_1,
+				WM8994_INPUTS_CLAMP, 0);
+	}
+	dev_info(priv->dev, "set fm input_clamp : %s\n", input_clamp_text[priv->input_clamp]);
+
+	return 0;
+}
+
+static int get_lineout_mode(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = priv->lineout_mode;
+	return 0;
+}
+
+static int set_lineout_mode(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	priv->lineout_mode = ucontrol->value.integer.value[0];
+	dev_dbg(priv->dev, "set lineout mode : %s\n",
+		lineout_mode_text[priv->lineout_mode]);
+	return 0;
+
+}
+
+static int get_aif2_mute_status(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = priv->aif2_digital_mute;
+	return 0;
+}
+
+static int set_aif2_mute_status(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct p4note_machine_priv *priv = snd_soc_component_get_drvdata(component);
+	int reg;
+
+	priv->aif2_digital_mute = ucontrol->value.integer.value[0];
+
+	if (snd_soc_component_read(component, WM8994_POWER_MANAGEMENT_6)
+		& WM8994_AIF2_DACDAT_SRC)
+		priv->aif2_digital_mute = 0;
+
+	if (priv->aif2_digital_mute)
+		reg = WM8994_AIF1DAC1_MUTE;
+	else
+		reg = 0;
+
+	snd_soc_component_update_bits(component, WM8994_AIF2_DAC_FILTERS_1,
+				WM8994_AIF1DAC1_MUTE, reg);
+
+	dev_info(priv->dev, "set aif2_digital_mute : %s\n",
+			switch_mode_text[priv->aif2_digital_mute]);
+
+	return 0;
+}
+
 static int p4note_mic_bias(struct snd_soc_dapm_widget *w,
 			  struct snd_kcontrol *kcontrol, int event)
 {
@@ -129,10 +404,12 @@ static int p4note_mic_bias(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		dev_info(priv->dev, "mic bias pre pmu");
 		err = regulator_enable(priv->reg_mic_bias);
 		msleep(150);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
+		dev_info(priv->dev, "mic bias post pmd");
 		return regulator_disable(priv->reg_mic_bias);
 	}
 
@@ -170,10 +447,22 @@ static const struct snd_kcontrol_new p4note_controls[] = {
 	SOC_DAPM_PIN_SWITCH("HDMI"),
 
 	SOC_DAPM_PIN_SWITCH("Main Mic"),
-	SOC_DAPM_PIN_SWITCH("Sub Mic"),
 	SOC_DAPM_PIN_SWITCH("Headset Mic"),
 
-	SOC_DAPM_PIN_SWITCH("FM In"),
+	SOC_ENUM_EXT("AIF2 Mode", aif2_mode_enum[0],
+		get_aif2_mode, set_aif2_mode),
+
+	SOC_ENUM_EXT("KPCS Mode", kpcs_mode_enum[0],
+		get_kpcs_mode, set_kpcs_mode),
+
+	SOC_ENUM_EXT("Input Clamp", input_clamp_enum[0],
+		get_input_clamp, set_input_clamp),
+
+	SOC_ENUM_EXT("LineoutSwitch Mode", lineout_mode_enum[0],
+		get_lineout_mode, set_lineout_mode),
+
+	SOC_ENUM_EXT("AIF2 digital mute", switch_mode_enum[0],
+		get_aif2_mute_status, set_aif2_mute_status),
 };
 
 static const struct snd_soc_dapm_widget p4note_dapm_widgets[] = {
@@ -184,11 +473,11 @@ static const struct snd_soc_dapm_widget p4note_dapm_widgets[] = {
 
 	SND_SOC_DAPM_LINE("LINE", p4note_line_set),
 	SND_SOC_DAPM_LINE("HDMI", NULL),
-	SND_SOC_DAPM_LINE("FM In", NULL),
 
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("Main Mic", p4note_mic_bias),
-	SND_SOC_DAPM_MIC("Sub Mic", NULL),
+
+	SND_SOC_DAPM_INPUT("S5P RP"),
 };
 
 static int p4note_late_probe(struct snd_soc_card *card) {
@@ -302,6 +591,7 @@ static struct snd_soc_dai_link p4note_dai[] = {
 	{
 		.name = "WM1811 Voice",
 		.stream_name = "Voice call",
+		.ops = &p4note_aif2_ops,
 		.ignore_suspend = 1,
 		SND_SOC_DAILINK_REG(aif2),
 	},
@@ -332,7 +622,6 @@ static int p4note_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct snd_soc_card *card = &p4note_card;
 	struct p4note_machine_priv *priv;
-	//struct device_node *np = pdev->dev->of_node;
 	static struct snd_soc_dai_link *dai_link;
 	struct device_node *cpu_dai_node, *codec_dai_node;
 	int ret, i;
@@ -343,6 +632,7 @@ static int p4note_probe(struct platform_device *pdev)
 
 	snd_soc_card_set_drvdata(card, priv);
 	card->dev = dev;
+	priv->dev = dev;
 
 	priv->reg_mic_bias = devm_regulator_get(dev, "mic-bias");
 	if (IS_ERR(priv->reg_mic_bias)) {
@@ -381,15 +671,6 @@ static int p4note_probe(struct platform_device *pdev)
 		goto put_cpu_dai_node;
 	}
 
-	/* for (i = 0; i < card->num_links; i++) {
-		card->dai_link[i].cpus->name = NULL;
-		card->dai_link[i].platforms->name = NULL;
-		
-		card->dai_link[i].cpus->of_node = cpu_dai_node;
-		card->dai_link[i].codecs->of_node = codec_dai_node;
-		card->dai_link[i].platforms->of_node = cpu_dai_node;
-	} */
-
 	for_each_card_prelinks(card, i, dai_link) {
 		dai_link->codecs->of_node = codec_dai_node;
 		dai_link->cpus->of_node = cpu_dai_node;
@@ -415,6 +696,8 @@ static int p4note_probe(struct platform_device *pdev)
 		dev_err(dev, "Failed to register card: %d\n", ret);
 		goto put_codec_mclk1;
 	}
+
+	priv->kpcs_mode = 2;
 
 	return 0;
 
