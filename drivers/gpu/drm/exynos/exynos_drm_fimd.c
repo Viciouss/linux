@@ -648,6 +648,11 @@ static void fimd_win_set_pixfmt(struct fimd_context *ctx, unsigned int win,
 	u32 val = WINCONx_ENWIN;
 	unsigned int pixel_alpha;
 
+	if (pixel_format == DRM_FORMAT_ABGR8888 || pixel_format == DRM_FORMAT_XBGR8888)
+		writel(WIN_RGB_ORDER_REVERSE, ctx->regs + WIN_RGB_ORDER(win));
+	else
+		writel(WIN_RGB_ORDER_FORWARD, ctx->regs + WIN_RGB_ORDER(win));
+
 	if (fb->format->has_alpha)
 		pixel_alpha = state->base.pixel_blend_mode;
 	else
