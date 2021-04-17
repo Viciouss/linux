@@ -10,9 +10,11 @@
 
 #include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/extcon.h>
 #include <linux/gpio.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/notifier.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
@@ -39,39 +41,53 @@
 #define CFG_CHARGE_CURRENT_PCC_MASK		0x18
 #define CFG_CHARGE_CURRENT_PCC_SHIFT		3
 #define CFG_CHARGE_CURRENT_TC_MASK		0x07
+
 #define CFG_CURRENT_LIMIT			0x01
 #define CFG_CURRENT_LIMIT_DC_MASK		0xf0
 #define CFG_CURRENT_LIMIT_DC_SHIFT		4
 #define CFG_CURRENT_LIMIT_USB_MASK		0x0f
+
+#define CFG_VARIOUS_FUNCTIONS			0x02
+
 #define CFG_FLOAT_VOLTAGE			0x03
 #define CFG_FLOAT_VOLTAGE_FLOAT_MASK		0x3f
 #define CFG_FLOAT_VOLTAGE_THRESHOLD_MASK	0xc0
 #define CFG_FLOAT_VOLTAGE_THRESHOLD_SHIFT	6
+
+#define CFG_CHARGE_CONTROL			0x04
+#define CFG_APSD				BIT(2)
+
 #define CFG_STAT				0x05
 #define CFG_STAT_DISABLED			BIT(5)
 #define CFG_STAT_ACTIVE_HIGH			BIT(7)
+
 #define CFG_PIN					0x06
 #define CFG_PIN_EN_CTRL_MASK			0x60
 #define CFG_PIN_EN_CTRL_ACTIVE_HIGH		0x40
 #define CFG_PIN_EN_CTRL_ACTIVE_LOW		0x60
 #define CFG_PIN_EN_APSD_IRQ			BIT(1)
 #define CFG_PIN_EN_CHARGER_ERROR		BIT(2)
+
 #define CFG_THERM				0x07
 #define CFG_THERM_SOFT_HOT_COMPENSATION_MASK	0x03
 #define CFG_THERM_SOFT_HOT_COMPENSATION_SHIFT	0
 #define CFG_THERM_SOFT_COLD_COMPENSATION_MASK	0x0c
 #define CFG_THERM_SOFT_COLD_COMPENSATION_SHIFT	2
 #define CFG_THERM_MONITOR_DISABLED		BIT(4)
+
 #define CFG_SYSOK				0x08
 #define CFG_SYSOK_SUSPEND_HARD_LIMIT_DISABLED	BIT(2)
+
 #define CFG_OTHER				0x09
 #define CFG_OTHER_RID_MASK			0xc0
 #define CFG_OTHER_RID_ENABLED_AUTO_OTG		0xc0
+
 #define CFG_OTG					0x0a
 #define CFG_OTG_TEMP_THRESHOLD_MASK		0x30
 #define CFG_OTG_TEMP_THRESHOLD_SHIFT		4
 #define CFG_OTG_CC_COMPENSATION_MASK		0xc0
 #define CFG_OTG_CC_COMPENSATION_SHIFT		6
+
 #define CFG_TEMP_LIMIT				0x0b
 #define CFG_TEMP_LIMIT_SOFT_HOT_MASK		0x03
 #define CFG_TEMP_LIMIT_SOFT_HOT_SHIFT		0
@@ -81,19 +97,25 @@
 #define CFG_TEMP_LIMIT_HARD_HOT_SHIFT		4
 #define CFG_TEMP_LIMIT_HARD_COLD_MASK		0xc0
 #define CFG_TEMP_LIMIT_HARD_COLD_SHIFT		6
+
 #define CFG_FAULT_IRQ				0x0c
 #define CFG_FAULT_IRQ_DCIN_UV			BIT(2)
+
 #define CFG_STATUS_IRQ				0x0d
 #define CFG_STATUS_IRQ_TERMINATION_OR_TAPER	BIT(4)
 #define CFG_STATUS_IRQ_CHARGE_TIMEOUT		BIT(7)
+
 #define CFG_ADDRESS				0x0e
 
 /* Command registers */
 #define CMD_A					0x30
 #define CMD_A_CHG_ENABLED			BIT(1)
 #define CMD_A_SUSPEND_ENABLED			BIT(2)
+#define CMD_A_ENABLE_OTG			BIT(4)
 #define CMD_A_ALLOW_WRITE			BIT(7)
 #define CMD_B					0x31
+#define CMD_B_HIGH_CURRENT_MODE			BIT(0)
+#define CMD_B_USB500_MODE			BIT(1)
 #define CMD_C					0x33
 
 /* Interrupt Status registers */
@@ -123,6 +145,7 @@
 #define STAT_C_CHG_SHIFT			1
 #define STAT_C_CHG_TERM				BIT(5)
 #define STAT_C_CHARGER_ERROR			BIT(6)
+#define STAT_D					0x3e
 #define STAT_E					0x3f
 
 #define SMB347_MAX_REGISTER			0x3f
@@ -196,6 +219,7 @@ struct smb347_charger {
 	bool			charging_enabled;
 	bool			irq_unsupported;
 
+	unsigned int		charge_current;
 	unsigned int		max_charge_current;
 	unsigned int		max_charge_voltage;
 	unsigned int		pre_charge_current;
@@ -214,7 +238,11 @@ struct smb347_charger {
 	bool			use_mains;
 	bool			use_usb;
 	bool			use_usb_otg;
+	bool			use_apsd;
 	unsigned int		enable_control;
+
+	struct extcon_dev	*edev;
+	struct notifier_block	cable_notifier;
 };
 
 enum smb_charger_chipid {
@@ -378,11 +406,13 @@ static int smb347_charging_set(struct smb347_charger *smb, bool enable)
 
 static inline int smb347_charging_enable(struct smb347_charger *smb)
 {
+	dev_info(smb->dev, "enable charging\n");
 	return smb347_charging_set(smb, true);
 }
 
 static inline int smb347_charging_disable(struct smb347_charger *smb)
 {
+	dev_info(smb->dev, "disable charging\n");
 	return smb347_charging_set(smb, false);
 }
 
@@ -408,20 +438,33 @@ static int smb347_start_stop_charging(struct smb347_charger *smb)
 	return ret;
 }
 
+static int set_const_charge_current(struct smb347_charger *smb, int value)
+{
+	int id = smb->id;
+	int ret, val;
+
+	ret = current_to_hw(fcc_tbl[id], ARRAY_SIZE(fcc_tbl[id]), value);
+	if (ret < 0)
+		return ret;
+
+	val = ret;
+
+	ret = regmap_update_bits(smb->regmap, CFG_CHARGE_CURRENT,
+					CFG_CHARGE_CURRENT_FCC_MASK,
+					ret << CFG_CHARGE_CURRENT_FCC_SHIFT);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
 static int smb347_set_charge_current(struct smb347_charger *smb)
 {
 	unsigned int id = smb->id;
 	int ret;
 
-	if (smb->max_charge_current) {
-		ret = current_to_hw(fcc_tbl[id], ARRAY_SIZE(fcc_tbl[id]),
-				    smb->max_charge_current);
-		if (ret < 0)
-			return ret;
-
-		ret = regmap_update_bits(smb->regmap, CFG_CHARGE_CURRENT,
-					 CFG_CHARGE_CURRENT_FCC_MASK,
-					 ret << CFG_CHARGE_CURRENT_FCC_SHIFT);
+	if (smb->charge_current) {
+		ret = set_const_charge_current(smb, smb->charge_current);
 		if (ret < 0)
 			return ret;
 	}
@@ -663,6 +706,20 @@ static int smb347_set_temp_limits(struct smb347_charger *smb)
 	return ret;
 }
 
+static int smb347_set_apsd(struct smb347_charger *smb)
+{
+	int ret;
+
+	if (smb->use_apsd) {
+		ret = regmap_update_bits(smb->regmap, CFG_CHARGE_CONTROL,
+					 CFG_APSD, CFG_APSD);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 /*
  * smb347_set_writable - enables/disables writing to non-volatile registers
  * @smb: pointer to smb347 charger instance
@@ -698,6 +755,10 @@ static int smb347_hw_init(struct smb347_charger *smb)
 	ret = smb347_set_current_limits(smb);
 	if (ret < 0)
 		goto fail;
+
+	ret = smb347_set_apsd(smb);
+	if (ret < 0)
+		dev_info(smb->dev, "Could not enable APSD!");
 
 	ret = smb347_set_voltage_limits(smb);
 	if (ret < 0)
@@ -1043,6 +1104,22 @@ static int smb347_get_charging_status(struct smb347_charger *smb,
 	return status;
 }
 
+static int smb347_set_property_locked(struct power_supply *psy,
+				      enum power_supply_property psp,
+				      const union power_supply_propval *val)
+{
+	struct smb347_charger *smb = power_supply_get_drvdata(psy);
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+		return set_const_charge_current(smb, val->intval);
+	default:
+		return -EPERM;
+	}
+
+	return 0;
+}
+
 static int smb347_get_property_locked(struct power_supply *psy,
 				      enum power_supply_property prop,
 				      union power_supply_propval *val)
@@ -1112,6 +1189,21 @@ static int smb347_get_property_locked(struct power_supply *psy,
 	return 0;
 }
 
+static int smb347_set_property(struct power_supply *psy,
+				       enum power_supply_property psp,
+				       const union power_supply_propval *val)
+{
+	struct smb347_charger *smb = power_supply_get_drvdata(psy);
+	struct i2c_client *client = to_i2c_client(smb->dev);
+	int ret;
+
+	disable_irq(client->irq);
+	ret = smb347_set_property_locked(psy, psp, val);
+	enable_irq(client->irq);
+
+	return ret;
+}
+
 static int smb347_get_property(struct power_supply *psy,
 			       enum power_supply_property prop,
 			       union power_supply_propval *val)
@@ -1146,6 +1238,7 @@ static bool smb347_volatile_reg(struct device *dev, unsigned int reg)
 	case STAT_A:
 	case STAT_B:
 	case STAT_C:
+	case STAT_D:
 	case STAT_E:
 		return true;
 	}
@@ -1158,7 +1251,9 @@ static bool smb347_readable_reg(struct device *dev, unsigned int reg)
 	switch (reg) {
 	case CFG_CHARGE_CURRENT:
 	case CFG_CURRENT_LIMIT:
+	case CFG_VARIOUS_FUNCTIONS:
 	case CFG_FLOAT_VOLTAGE:
+	case CFG_CHARGE_CONTROL:
 	case CFG_STAT:
 	case CFG_PIN:
 	case CFG_THERM:
@@ -1178,9 +1273,83 @@ static bool smb347_readable_reg(struct device *dev, unsigned int reg)
 	return smb347_volatile_reg(dev, reg);
 }
 
-static void smb347_dt_parse_dev_info(struct smb347_charger *smb)
+static bool smb347_writable_reg(struct device *dev, unsigned int reg)
+{
+	switch (reg) {
+	case CFG_CHARGE_CURRENT:
+	case CFG_CURRENT_LIMIT:
+	case CFG_VARIOUS_FUNCTIONS:
+	case CFG_FLOAT_VOLTAGE:
+	case CFG_CHARGE_CONTROL:
+	case CFG_STAT:
+	case CFG_PIN:
+	case CFG_THERM:
+	case CFG_SYSOK:
+	case CFG_OTHER:
+	case CFG_OTG:
+	case CFG_TEMP_LIMIT:
+	case CFG_FAULT_IRQ:
+	case CFG_STATUS_IRQ:
+	case CFG_ADDRESS:
+	case CMD_A:
+	case CMD_B:
+	case CMD_C:
+		return true;
+	}
+
+	return false;
+}
+
+static void extcon_cable_worker(struct smb347_charger *smb)
+{
+	struct extcon_dev *edev = smb->edev;
+	int ret, val;
+
+	smb347_charging_disable(smb);
+	smb347_set_writable(smb, true);
+
+	if (extcon_get_state(edev, EXTCON_CHG_USB_SDP)) {
+		dev_dbg(smb->dev, "enabling USB500 mode");
+		val = CMD_B_USB500_MODE;
+	} else if (extcon_get_state(edev, EXTCON_CHG_USB_DCP)) {
+		dev_dbg(smb->dev, "detected dedicated charger");
+		val = CMD_B_USB500_MODE | CMD_B_HIGH_CURRENT_MODE;
+	} else {
+		val = 0;
+	}
+
+	ret = regmap_update_bits(smb->regmap, CMD_B,
+			CMD_B_USB500_MODE | CMD_B_HIGH_CURRENT_MODE, val);
+	if (ret < 0) {
+		dev_info(smb->dev, "setting USB mode failed");
+		return;
+	}
+
+	smb347_set_writable(smb, false);
+	smb347_charging_enable(smb);
+
+	dev_dbg(smb->dev, "applying updated state to power supply");
+	smb347_update_ps_status(smb);
+	if (smb->use_mains)
+		power_supply_changed(smb->mains);
+	if (smb->use_usb)
+		power_supply_changed(smb->usb);
+}
+
+static int extcon_cable_event(struct notifier_block *nb,
+					   unsigned long event, void *param)
+{
+	struct smb347_charger *smb =
+		container_of(nb, struct smb347_charger, cable_notifier);
+	dev_info(smb->dev, "received extcon cable event, triggering scheduled work...");
+	extcon_cable_worker(smb);
+	return NOTIFY_OK;
+}
+
+static int smb347_dt_parse_dev_info(struct smb347_charger *smb)
 {
 	struct device *dev = smb->dev;
+	int ret;
 
 	smb->soft_temp_limit_compensation =
 					SMB3XX_SOFT_TEMP_COMPENSATE_DEFAULT;
@@ -1217,6 +1386,24 @@ static void smb347_dt_parse_dev_info(struct smb347_charger *smb)
 	/* Select charging control */
 	device_property_read_u32(dev, "summit,enable-charge-control",
 				 &smb->enable_control);
+
+	smb->use_apsd = device_property_read_bool(dev, "summit,automatic-power-source-detection");
+
+	smb->edev = extcon_get_edev_by_phandle(dev, 0);
+	if (IS_ERR(smb->edev)) {
+		if (PTR_ERR(smb->edev) != -EPROBE_DEFER)
+			dev_err(dev, "missing extcon connection\n");
+		return PTR_ERR(smb->edev);
+	}
+
+	if (smb->edev) {
+		smb->cable_notifier.notifier_call = extcon_cable_event;
+		ret = devm_extcon_register_notifier_all(dev, smb->edev, &smb->cable_notifier);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static int smb347_get_battery_info(struct smb347_charger *smb)
@@ -1236,8 +1423,10 @@ static int smb347_get_battery_info(struct smb347_charger *smb)
 	if (err)
 		return err;
 
-	if (info.constant_charge_current_max_ua != -EINVAL)
+	if (info.constant_charge_current_max_ua != -EINVAL) {
 		smb->max_charge_current = info.constant_charge_current_max_ua;
+		smb->charge_current = smb->max_charge_current;
+	}
 
 	if (info.constant_charge_voltage_max_uv != -EINVAL)
 		smb->max_charge_voltage = info.constant_charge_voltage_max_uv;
@@ -1274,12 +1463,14 @@ static const struct regmap_config smb347_regmap = {
 	.max_register	= SMB347_MAX_REGISTER,
 	.volatile_reg	= smb347_volatile_reg,
 	.readable_reg	= smb347_readable_reg,
+	.writeable_reg	= smb347_writable_reg,
 };
 
 static const struct power_supply_desc smb347_mains_desc = {
 	.name		= "smb347-mains",
 	.type		= POWER_SUPPLY_TYPE_MAINS,
 	.get_property	= smb347_get_property,
+	.set_property	= smb347_set_property,
 	.properties	= smb347_properties,
 	.num_properties	= ARRAY_SIZE(smb347_properties),
 };
@@ -1288,6 +1479,7 @@ static const struct power_supply_desc smb347_usb_desc = {
 	.name		= "smb347-usb",
 	.type		= POWER_SUPPLY_TYPE_USB,
 	.get_property	= smb347_get_property,
+	.set_property	= smb347_set_property,
 	.properties	= smb347_properties,
 	.num_properties	= ARRAY_SIZE(smb347_properties),
 };
@@ -1307,7 +1499,10 @@ static int smb347_probe(struct i2c_client *client,
 	smb->id = id->driver_data;
 	i2c_set_clientdata(client, smb);
 
-	smb347_dt_parse_dev_info(smb);
+	ret = smb347_dt_parse_dev_info(smb);
+	if (ret)
+		return ret;
+
 	if (!smb->use_mains && !smb->use_usb)
 		return -EINVAL;
 
