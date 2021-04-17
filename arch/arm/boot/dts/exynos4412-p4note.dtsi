@@ -276,7 +276,7 @@
 		pinctrl-0 = <&led_bl_reset>;
 		pinctrl-names = "default";
 		enable-gpios = <&gpm0 1 GPIO_ACTIVE_HIGH>;
-		pwms = <&pwm 1 32768 0>;
+		pwms = <&pwm 1 78770 0>;
 		brightness-levels = <0 4 8 12 16 20 24 32 40 48 56 64 72 80 88 96 104 112 120 128 255>;
 		default-brightness-level = <5>;
 	};
