@@ -187,7 +187,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		battery: fuel-gauge@36 {
+		fuel-gauge@36 {
 			compatible = "maxim,max17042";
 			reg = <0x36>;
 			pinctrl-0 = <&fuel_alert_irq>;
@@ -199,6 +199,7 @@
 			maxim,over-volt = <4300>;
 
 			power-supplies = <&power_supply>;
+			monitored-battery = <&battery_cell>;
 		};
 	};
 
@@ -249,9 +250,9 @@
 			summit,enable-charge-control = <SMB3XX_CHG_ENABLE_SW>;
 			summit,fast-voltage-threshold-microvolt = <2600000>;
 			summit,chip-temperature-threshold-celsius = <130>;
-			summit,usb-current-limit-microamp = <2200000>;
+			summit,usb-current-limit-microamp = <2000000>;
 
-			monitored-battery = <&battery>;
+			monitored-battery = <&battery_cell>;
 		};
 	};
 
@@ -317,8 +318,13 @@
 			/* "IN2LP:VXRN", "MICBIAS2",
 			"MICBIAS2", "Headset Mic", */
 
-			"IN2RN", "FM In",
-			"IN2RP:VXRP", "FM In";
+	battery_cell: battery-cell {
+		compatible = "simple-battery";
+		constant-charge-current-max-microamp = <2200000>;
+		precharge-current-microamp = <250000>;
+		charge-term-current-microamp = <250000>;
+		constant-charge-voltage-max-microvolt = <4200000>;
+	};
 
 			/* "IN2RN", "Third Mic",
 			"IN2RP:VXRP", "Third Mic"; */
