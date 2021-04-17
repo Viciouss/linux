@@ -311,7 +311,7 @@
 
 			"IN2LP:VXRN", "MICBIAS2",
 			"Headset Mic", "MICBIAS2",
-			
+
 			"AIF1DAC1L", "S5P RP",
 			"AIF1DAC1R", "S5P RP";
 	};
@@ -341,7 +341,7 @@
 		usb0-gpios = <&gpy0 4 GPIO_ACTIVE_HIGH>;
 		usb1-gpios = <&gpy0 5 GPIO_ACTIVE_HIGH>;
 		cp-gpios = <&gpm0 7 GPIO_ACTIVE_HIGH>;
-		
+
 		uart1-gpios = <&gpl2 7 GPIO_ACTIVE_HIGH>;
 
 		acc_en-gpios = <&gpl2 6 GPIO_ACTIVE_HIGH>;
@@ -531,7 +531,7 @@
 		DBVDD3-supply = <&wm1811_spkvdd>;
 		SPKVDD1-supply = <&wm1811_spkvdd>;
 		SPKVDD2-supply = <&wm1811_spkvdd>;
-		
+
 		wlf,micbias-cfg = <0x2F 0x27>;
 		wlf,gpio-cfg = <0x3 0x0 0x0 0x0 0x0 0x0 0x0 0x8000 0x0 0x0 0x0>;
 		wlf,lineout1-feedback;
