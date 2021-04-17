@@ -246,11 +246,15 @@
 		power_supply: charger@6 {
 			compatible = "summit,smb347";
 			reg = <0x6>;
+			pinctrl-0 = <&ta_enable>;
+			pinctrl-names = "default";
 			summit,enable-usb-charging;
 			summit,enable-charge-control = <SMB3XX_CHG_ENABLE_SW>;
 			summit,fast-voltage-threshold-microvolt = <2600000>;
 			summit,chip-temperature-threshold-celsius = <130>;
 			summit,usb-current-limit-microamp = <2000000>;
+
+			extcon = <&extcon_p4note>;
 
 			monitored-battery = <&battery_cell>;
 		};
