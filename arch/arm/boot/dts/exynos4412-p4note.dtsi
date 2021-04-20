@@ -1439,6 +1439,7 @@
 		mode-recovery = <BOOT_RECOVERY>;
 		mode-bootloader = <BOOT_DOWNLOAD>;
 		mode-download = <BOOT_DOWNLOAD>;
+		default-magic = <BOOT_NORMAL>;
 	};
 };
 
