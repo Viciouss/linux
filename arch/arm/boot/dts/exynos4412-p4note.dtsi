@@ -1424,11 +1424,12 @@
 	#define BOOT_NORMAL		(BOOT_MODE_PREFIX | 0)
 	#define BOOT_DOWNLOAD		(BOOT_MODE_PREFIX | 1)
 	#define BOOT_RECOVERY		(BOOT_MODE_PREFIX | 4)
+	#define NO_LPM_MODE		0x12345678
 
 	no-lpm-mode {
 		compatible = "syscon-reboot";
 		offset = <S5P_INFORM2>;
-		value = <0x12345678>;
+		value = <NO_LPM_MODE>;
 	};
 
 	reboot-mode {
