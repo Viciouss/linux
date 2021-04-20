@@ -49,6 +49,8 @@ static int reboot_mode_notify(struct notifier_block *this,
 	magic = get_reboot_mode_magic(reboot, cmd);
 	if (magic)
 		reboot->write(reboot, magic);
+	else if (reboot->default_magic)
+		reboot->write(reboot, reboot->default_magic);
 
 	return NOTIFY_DONE;
 }
@@ -100,6 +102,8 @@ int reboot_mode_register(struct reboot_mode_driver *reboot)
 
 		list_add_tail(&info->list, &reboot->head);
 	}
+
+	of_property_read_u32(np, "default-magic", &reboot->default_magic);
 
 	reboot->reboot_notifier.notifier_call = reboot_mode_notify;
 	register_reboot_notifier(&reboot->reboot_notifier);
