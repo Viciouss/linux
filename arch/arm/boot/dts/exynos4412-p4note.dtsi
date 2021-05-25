@@ -120,6 +120,14 @@
 		regulator-always-on;
 	};
 
+	epen_vdd_en: epen-vdd-en {
+		compatible = "regulator-fixed";
+		regulator-name = "EPEN_VDD_EN";
+		gpios = <&gpc1 1 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+	};
+
 	panel_vdd: voltage-regulator-4 {
 		compatible = "regulator-fixed";
 		regulator-name = "LCD_ENABLE";
@@ -553,6 +561,36 @@
 	};
 };
 
+&i2c_6 {
+	// wacom pen
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c6_bus>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	wacom_g5sp_i2c@56 {
+		compatible = "wacom,wacom-g5sp-i2c";
+		reg = <0x56>;
+		pinctrl-0 = <&pen_pdct &pen_irq &s_pen_irq &wacom_ldo_init>;
+		pinctrl-names = "default";
+		vdd-supply = <&epen_vdd_en>;
+		/* gpios */
+		wacom,irq-gpio = <&gpc1 2 0x00>;
+		wacom,pen_pdct-gpio = <&gpc1 0 0x00>;
+		wacom,sense-gpio = <&gpx1 5 0x0>;
+		/* features */
+		wacom,irq_type = <IRQ_TYPE_EDGE_RISING>;
+		wacom,irq_flags = <0x1>;
+		wacom,ic_mpu_ver = <0x22>;
+		wacom,firmware_version_of_file = <0x22F>;
+		wacom,firmware_checksum = <0x1F 0xF1 0x76 0x81 0x71>;
+		/* x_invert y_invert min_x max_x min_y max_y xy_switch min_pressure max_pressure */
+		wacom,panel-coords = <0 0 0 21866 0 13730 0 0 1023>;
+	};
+};
+
 &i2c_7 {
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
@@ -910,6 +948,25 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
+	pen_pdct: pen-pdct {
+		samsung,pins = "gpc1-0";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+	};
+
+	wacom_ldo_init: wacom-ldo-init {
+		samsung,pins = "gpc1-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <0>;
+	};
+
+	pen_irq: pen-irq {
+		samsung,pins = "gpc1-2";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+	};
+
 	lineout_en: lineout-en {
 		samsung,pins = "gpj1-2";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
@@ -1153,6 +1210,12 @@
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	s_pen_irq: s-pen-irq {
+		samsung,pins = "gpx1-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
 	};
 
 	gpio_keys: gpio-keys {
