@@ -243,8 +243,8 @@
 
 	i2c-gpio-4 {
 		compatible = "i2c-gpio";
-		sda-gpios = <&gpm2 0 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
-		scl-gpios = <&gpm2 1 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		sda-gpios = <&gpm2 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpm2 1 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 
 		i2c-gpio,delay-us = <2>;
 		#address-cells = <1>;
