@@ -20,6 +20,7 @@ struct syscon_reboot_context {
 	u32 offset;
 	u32 value;
 	u32 mask;
+	u32 priority;
 	struct notifier_block restart_handler;
 };
 
@@ -76,8 +77,12 @@ static int syscon_reboot_probe(struct platform_device *pdev)
 		ctx->mask = 0xFFFFFFFF;
 	}
 
+	if (of_property_read_u32(pdev->dev.of_node, "priority", &ctx->priority) || ctx->priority <= 0) {
+		ctx->priority = 192;
+	}
+
 	ctx->restart_handler.notifier_call = syscon_restart_handle;
-	ctx->restart_handler.priority = 192;
+	ctx->restart_handler.priority = ctx->priority;
 	err = register_restart_handler(&ctx->restart_handler);
 	if (err)
 		dev_err(dev, "can't register restart notifier (err=%d)\n", err);
