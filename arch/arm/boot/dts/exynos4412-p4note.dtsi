@@ -1508,6 +1508,7 @@
 		compatible = "syscon-reboot";
 		offset = <S5P_INFORM2>;
 		value = <NO_LPM_MODE>;
+		priority = <256>;
 	};
 
 	reboot-mode {
