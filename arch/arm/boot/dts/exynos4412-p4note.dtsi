@@ -576,7 +576,7 @@
 	};
 };
 
-&i2c_6 {
+/*&i2c_6 {
 	// wacom pen
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
@@ -591,20 +591,20 @@
 		pinctrl-0 = <&pen_pdct &pen_irq &s_pen_irq &wacom_ldo_init>;
 		pinctrl-names = "default";
 		vdd-supply = <&epen_vdd_en>;
-		/* gpios */
+		// gpios
 		wacom,irq-gpio = <&gpc1 2 0x00>;
 		wacom,pen_pdct-gpio = <&gpc1 0 0x00>;
 		wacom,sense-gpio = <&gpx1 5 0x0>;
-		/* features */
+		// features
 		wacom,irq_type = <IRQ_TYPE_EDGE_RISING>;
 		wacom,irq_flags = <0x1>;
 		wacom,ic_mpu_ver = <0x22>;
 		wacom,firmware_version_of_file = <0x22F>;
 		wacom,firmware_checksum = <0x1F 0xF1 0x76 0x81 0x71>;
-		/* x_invert y_invert min_x max_x min_y max_y xy_switch min_pressure max_pressure */
+		// x_invert y_invert min_x max_x min_y max_y xy_switch min_pressure max_pressure
 		wacom,panel-coords = <0 0 0 21866 0 13730 0 0 1023>;
 	};
-};
+};*/
 
 &i2c_7 {
 	samsung,i2c-sda-delay = <100>;
