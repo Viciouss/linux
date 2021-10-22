@@ -998,9 +998,98 @@ max17042_get_pdata(struct max17042_chip *chip)
 	return max17042_get_default_pdata(chip);
 }
 
+static bool max17042_volatile_reg(struct device *dev, unsigned int reg)
+{
+	return false;
+}
+
+static bool max17042_readable_reg(struct device *dev, unsigned int reg)
+{
+	switch (reg) {
+	case MAX17042_STATUS:
+	case MAX17042_VALRT_Th:
+	case MAX17042_TALRT_Th:
+	case MAX17042_SALRT_Th:
+	case MAX17042_AtRate:
+	case MAX17042_RepCap:
+	case MAX17042_RepSOC:
+	case MAX17042_Age:
+	case MAX17042_TEMP:
+	case MAX17042_VCELL:
+	case MAX17042_Current:
+	case MAX17042_AvgCurrent:
+	case MAX17042_SOC:
+	case MAX17042_AvSOC:
+	case MAX17042_RemCap:
+	case MAX17042_FullCAP:
+	case MAX17042_TTE:
+	case MAX17042_V_empty:
+	case MAX17042_RSLOW:
+	case MAX17042_AvgTA:
+	case MAX17042_Cycles:
+	case MAX17042_DesignCap:
+	case MAX17042_AvgVCELL:
+	case MAX17042_MinMaxTemp:
+	case MAX17042_MinMaxVolt:
+	case MAX17042_MinMaxCurr:
+	case MAX17042_CONFIG:
+	case MAX17042_ICHGTerm:
+	case MAX17042_AvCap:
+	case MAX17042_ManName:
+	case MAX17042_DevName:
+	case MAX17042_FullCAPNom:
+	case MAX17042_TempNom:
+	case MAX17042_TempLim:
+	case MAX17042_TempHot:
+	case MAX17042_AIN:
+	case MAX17042_LearnCFG:
+	case MAX17042_FilterCFG:
+	case MAX17042_RelaxCFG:
+	case MAX17042_MiscCFG:
+	case MAX17042_TGAIN:
+	case MAx17042_TOFF:
+	case MAX17042_CGAIN:
+	case MAX17042_COFF:
+	case MAX17042_MaskSOC:
+	case MAX17042_SOC_empty:
+	case MAX17042_T_empty:
+	case MAX17042_FullCAP0:
+	case MAX17042_LAvg_empty:
+	case MAX17042_FCTC:
+	case MAX17042_RCOMP0:
+	case MAX17042_TempCo:
+	case MAX17042_EmptyTempCo:
+	case MAX17042_K_empty0:
+	case MAX17042_TaskPeriod:
+	case MAX17042_FSTAT:
+	case MAX17042_SHDNTIMER:
+	case MAX17042_dQacc:
+	case MAX17042_dPacc:
+	case MAX17042_VFSOC0:
+	case MAX17042_QH:
+	case MAX17042_QL:
+	case MAX17042_MODELChrTbl:
+	case MAX17042_OCV:
+	case MAX17042_OCVInternal:
+	case MAX17042_VFSOC:
+		return true;
+	}
+
+	return false;
+}
+
+static bool max17042_writable_reg(struct device *dev, unsigned int reg)
+{
+	return false;
+}
+
 static const struct regmap_config max17042_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 16,
+	.max_register = MAX17042_VFSOC,
+	.volatile_reg = max17042_volatile_reg,
+	.readable_reg = max17042_readable_reg,
+	.writeable_reg = max17042_writable_reg,
 	.val_format_endian = REGMAP_ENDIAN_NATIVE,
 };
 
