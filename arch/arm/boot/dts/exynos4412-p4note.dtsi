@@ -1522,6 +1522,15 @@
 	};
 };
 
+&poweroff {
+	compatible = "syscon-poweroff,p4note";
+	regmap = <&pmu_system_controller>;
+	offset = <0x330C>; /* PS_HOLD_CONTROL */
+	mask = <0x5200>; /* reset value */
+	lpm_offset = <S5P_INFORM2>;
+	extcon = <&extcon_p4note>;
+};
+
 &pwm {
 	pinctrl-0 = <&pwm1_out>;
 	pinctrl-names = "default";
