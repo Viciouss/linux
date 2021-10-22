@@ -237,6 +237,14 @@ config POWER_RESET_SYSCON_POWEROFF
 	help
 	  Poweroff support for generic SYSCON mapped register poweroff.
 
+config POWER_RESET_SYSCON_POWEROFF_P4NOTE
+	bool "Samsung P4Note SYSCON regmap poweroff driver"
+	depends on OF
+	depends on HAS_IOMEM
+	select MFD_SYSCON
+	help
+	  Poweroff support for Samsung P4Note SYSCON mapped register poweroff.
+
 config POWER_RESET_RMOBILE
 	tristate "Renesas R-Mobile reset driver"
 	depends on ARCH_RMOBILE || COMPILE_TEST
