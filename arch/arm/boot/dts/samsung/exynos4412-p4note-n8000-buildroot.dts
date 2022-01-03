@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Samsung's Galaxy Note 10.1 - N801x (wifi only version)
+ *
+ * Copyright (c) 2013 Samsung Electronics Co., Ltd.
+ *		http://www.samsung.com
+ */
+
+/dts-v1/;
+#include "exynos4412-p4note.dtsi"
+
+/ {
+	model = "Samsung Galaxy Note 10.1 (GT-N8000) based on Exynos4412";
+	compatible = "samsung,n8000", "samsung,p4note", "samsung,exynos4412", "samsung,exynos4";
+	chassis-type = "tablet";
+
+	chosen {
+		bootargs = "root=/dev/mmcblk0p9 rw init=/linuxrc earlyprintk console=ttySAC2 console=tty0 androidboot.selinux=permissive androidboot.hardware=smdk4x12";
+		stdout-path = "serial2:115200n8";
+	};
+};
