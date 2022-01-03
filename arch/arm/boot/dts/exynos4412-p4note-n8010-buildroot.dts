@@ -15,8 +15,7 @@
 	chassis-type = "tablet";
 
 	chosen {
-		bootargs = "root=/dev/mmcblk0p9 rw ignore_loglevel earlyprintk init=/linuxrc";
+		bootargs = "root=/dev/mmcblk0p9 rw init=/linuxrc earlyprintk console=ttySAC2 console=tty0 androidboot.selinux=permissive androidboot.hardware=smdk4x12";
+		stdout-path = "serial2:115200n8";
 	};
-
-	/* this is the base variant without any kind of modem */
 };
