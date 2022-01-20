@@ -10,6 +10,7 @@
 /dts-v1/;
 #include "exynos4412.dtsi"
 #include "exynos4412-ppmu-common.dtsi"
+#include "exynos-mfc-reserved-memory.dtsi"
 
 #include <dt-bindings/clock/maxim,max77686.h>
 #include <dt-bindings/gpio/gpio.h>
