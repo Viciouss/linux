@@ -39,6 +39,13 @@
 			console-size    = <0x00020000>;
 			ftrace-size     = <0x00020000>;
 		};
+
+		cma: linux,cma {
+			compatible = "shared-dma-pool";
+			size = <0x8000000>; /* 128MB */
+			reusable;
+			linux,cma-default;
+		};
 	};
 
 	chosen {
