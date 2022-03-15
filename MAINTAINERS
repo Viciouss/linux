@@ -11324,6 +11324,12 @@ F:	drivers/gpu/drm/ci/xfails/powervr*
 F:	drivers/gpu/drm/imagination/
 F:	include/uapi/drm/pvr_drm.h
 
+IMMERSION ISA1200 HAPTIC FEEDBACK CHIP
+M:	Linus Walleij <linus.walleij@linaro.org>
+L:	linux-input@vger.kernel.org
+F:	Documentation/devicetree/bindings/input/immersion,isa1200.yaml
+F:	drivers/input/misc/isa1200.c
+
 IMON SOUNDGRAPH USB IR RECEIVER
 M:	Sean Young <sean@mess.org>
 L:	linux-media@vger.kernel.org
