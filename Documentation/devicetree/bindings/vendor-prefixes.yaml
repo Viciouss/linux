@@ -698,6 +698,8 @@ patternProperties:
     description: Imagination Technologies Ltd.
   "^imi,.*":
     description: Integrated Micro-Electronics Inc.
+  "^immersion,.*":
+    description: Immersion Corporation
   "^inanbo,.*":
     description: Shenzhen INANBO Electronic Technology Co., Ltd.
   "^incircuit,.*":
