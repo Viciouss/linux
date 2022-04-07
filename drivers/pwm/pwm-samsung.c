@@ -383,7 +383,7 @@ static int __pwm_samsung_config(struct pwm_chip *chip, struct pwm_device *pwm,
 	 * update to prevent the signal staying high if the PWM is disabled
 	 * shortly afer this update (before it autoreloaded the new values).
 	 */
-	if (oldtcmp == (u32) -1) {
+	if (oldtcmp == (u32)-1 || tcmp == (u32)-1) {
 		dev_dbg(our_chip->chip.dev, "Forcing manual update");
 		pwm_samsung_manual_update(our_chip, pwm);
 	}
