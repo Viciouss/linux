@@ -1047,7 +1047,7 @@ static bool max17042_readable_reg(struct device *dev, unsigned int reg)
 	case MAX17042_RelaxCFG:
 	case MAX17042_MiscCFG:
 	case MAX17042_TGAIN:
-	case MAx17042_TOFF:
+	case MAX17042_TOFF:
 	case MAX17042_CGAIN:
 	case MAX17042_COFF:
 	case MAX17042_MaskSOC:
