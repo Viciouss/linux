@@ -18,6 +18,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/fs.h>
 #include <linux/input.h>
 #include <linux/i2c.h>
 #include "wacom_i2c.h"
@@ -1528,4 +1529,5 @@ module_exit(wacom_i2c_exit);
 
 MODULE_AUTHOR("Samsung");
 MODULE_DESCRIPTION("Driver for Wacom G5SP Digitizer Controller");
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 MODULE_LICENSE("GPL");
