@@ -14,5 +14,9 @@
 	compatible = "samsung,n8010", "samsung,p4note", "samsung,exynos4412", "samsung,exynos4";
 	chassis-type = "tablet";
 
+	chosen {
+		bootargs = "root=/dev/ram0 rw ramdisk=8192 initrd=0x42000000,8M init=/init androidboot.selinux=permissive androidboot.hardware=smdk4x12";
+	};
+
 	/* this is the base variant without any kind of modem */
 };

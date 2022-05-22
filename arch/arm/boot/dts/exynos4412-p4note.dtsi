@@ -305,12 +305,26 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
+		power_supply: charger@6 {
+			compatible = "summit,smb347";
+			reg = <0x6>;
+			summit,enable-usb-charging;
+			summit,enable-charge-control = <SMB3XX_CHG_ENABLE_SW>;
+			summit,fast-voltage-threshold-microvolt = <2600000>;
+			summit,chip-temperature-threshold-celsius = <130>;
+			summit,usb-current-limit-microamp = <1800000>;
+
+			monitored-battery = <&battery_cell>;
+		};
+
+	};
+
 	extcon_p4note: external-connector {
 		compatible = "extcon,p4note";
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&accessory_int &dock_int &charger_int
-			     &usb_sel &usb_acc_en &usb_acc_5v>;
+			&usb_sel &usb_acc_en &usb_acc_5v>;
 
 		io-channels = <&stmpe_adc 0>, <&stmpe_adc 1>, <&stmpe_adc 2>;
 		io-channel-names = "headphone", "charger", "accessory";
@@ -328,7 +342,6 @@
 		acc_en-gpios = <&gpl2 6 GPIO_ACTIVE_HIGH>;
 		acc_5v-gpios = <&gpx3 5 GPIO_ACTIVE_HIGH>;
 	};
-
 };
 
 &adc {
@@ -1364,7 +1377,7 @@
 	regmap = <&pmu_system_controller>;
 	offset = <0x330C>; /* PS_HOLD_CONTROL */
 	mask = <0x5200>; /* reset value */
-	lpm_offset = <S5P_INFORM2>;
+	lpm_offset = <0x0808>; /* S5P_INFORM2 */
 	extcon = <&extcon_p4note>;
 };
 
