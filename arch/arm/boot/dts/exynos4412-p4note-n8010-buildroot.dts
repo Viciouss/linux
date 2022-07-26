@@ -14,7 +14,7 @@
 	compatible = "samsung,n8010", "samsung,p4note", "samsung,exynos4412", "samsung,exynos4";
 
 	chosen {
-		bootargs = "root=/dev/mmcblk2p9 rw init=/linuxrc earlyprintk console=ttySAC2";
+		bootargs = "root=/dev/mmcblk2p9 rw init=/linuxrc earlyprintk console=ttySAC2 console=tty0";
 		stdout-path = "serial2:115200n8";
 	};
 };
