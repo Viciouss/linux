@@ -181,6 +181,9 @@ static int midas_submic_bias(struct snd_soc_dapm_widget *w,
 	struct snd_soc_card *card = w->dapm->card;
 	struct midas_priv *priv = snd_soc_card_get_drvdata(card);
 
+	if (!priv->reg_submic_bias)
+		return 0;
+
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
 		return regulator_enable(priv->reg_submic_bias);
@@ -436,10 +439,19 @@ static int midas_probe(struct platform_device *pdev)
 		return PTR_ERR(priv->reg_mic_bias);
 	}
 
-	priv->reg_submic_bias = devm_regulator_get(dev, "submic-bias");
+	priv->reg_submic_bias = devm_regulator_get_optional(dev, "submic-bias");
 	if (IS_ERR(priv->reg_submic_bias)) {
-		dev_err(dev, "Failed to get submic bias regulator\n");
+		ret = PTR_ERR(priv->reg_submic_bias);
+		if (ret == -ENODEV)
+			priv->reg_submic_bias = NULL;
+		else {
+			dev_err(dev, "Failed to get submic bias regulator\n");
+			return PTR_ERR(priv->reg_submic_bias);
 		return PTR_ERR(priv->reg_submic_bias);
+			return PTR_ERR(priv->reg_submic_bias);
+		return PTR_ERR(priv->reg_submic_bias);
+			return PTR_ERR(priv->reg_submic_bias);
+		}
 	}
 
 	priv->gpio_fm_sel = devm_gpiod_get_optional(dev, "fm-sel", GPIOD_OUT_HIGH);
