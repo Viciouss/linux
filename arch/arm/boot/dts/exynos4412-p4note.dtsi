@@ -229,6 +229,21 @@
 		};
 	};
 
+	i2c-gpio-5 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpl0 2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpl0 1 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		light-sensor@1c {
+			compatible = "liteon,al3201";
+			reg = <0x1c>;
+		};
+	};
+
 	panel {
 		compatible = "samsung,ltl101al01";
 		pinctrl-0 = <&lvds_nshdn>;
