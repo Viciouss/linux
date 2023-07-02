@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/iio/light/liteon,al3201.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: LiteON AL3201 sensor
+
+maintainers:
+  - Martin Jücker <martin.juecker@gmail.com>
+
+properties:
+  compatible:
+    const: liteon,al3201
+
+  reg:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        light-sensor@1c {
+            compatible = "liteon,al3201";
+            reg = <0x1c>;
+        };
+    };
