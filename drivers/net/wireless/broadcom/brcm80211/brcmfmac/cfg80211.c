@@ -2765,6 +2765,7 @@ brcmf_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev,
 	struct brcmf_scb_val_le scb_val;
 	s32 err = 0;
 	struct brcmf_sta_info_le sta_info_le;
+	struct brcmf_pktcnt_le pktcnt;
 	u32 sta_flags;
 	u32 is_tdls_peer;
 	s32 total_rssi_avg = 0;
@@ -2856,20 +2857,61 @@ brcmf_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev,
 				BIT_ULL(NL80211_STA_INFO_CHAIN_SIGNAL_AVG);
 			sinfo->signal = total_rssi / count_rssi;
 			sinfo->signal_avg = total_rssi_avg / count_rssi;
-		} else if (test_bit(BRCMF_VIF_STATUS_CONNECTED,
-			&ifp->vif->sme_state)) {
+		}
+	}
+
+	/* Fall back to the plain firmware commands for anything the sta_info
+	 * query did not provide. They describe the current link rather than a
+	 * per-peer entry and do not depend on the per-STA database, so they
+	 * also work on firmware that reports no per-STA statistics at all (no
+	 * BRCMF_STA_SCBSTATS in the flags). Only meaningful for an associated
+	 * client: in AP mode these would return radio-wide values instead of
+	 * per-client ones. Both are best effort, as omitting an attribute is
+	 * preferable to failing the whole request.
+	 */
+	if (test_bit(BRCMF_VIF_STATUS_CONNECTED, &ifp->vif->sme_state)) {
+		/* No usable per-antenna RSSI in sta_info. */
+		if (!count_rssi) {
 			memset(&scb_val, 0, sizeof(scb_val));
 			err = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_RSSI,
-						     &scb_val, sizeof(scb_val));
+						     &scb_val,
+						     sizeof(scb_val));
 			if (err) {
 				bphy_err(drvr, "Could not get rssi (%d)\n",
 					 err);
-				goto done;
+				err = 0;
 			} else {
 				rssi = le32_to_cpu(scb_val.val);
-				sinfo->filled |= BIT_ULL(NL80211_STA_INFO_SIGNAL);
+				sinfo->filled |=
+					BIT_ULL(NL80211_STA_INFO_SIGNAL);
 				sinfo->signal = rssi;
 				brcmf_dbg(CONN, "RSSI %d dBm\n", rssi);
+			}
+		}
+		/* No per-STA statistics at all, so no packet counters. */
+		if (!(sta_flags & BRCMF_STA_SCBSTATS)) {
+			memset(&pktcnt, 0, sizeof(pktcnt));
+			err = brcmf_fil_cmd_data_get(ifp,
+						     BRCMF_C_GET_GET_PKTCNTS,
+						     &pktcnt, sizeof(pktcnt));
+			if (err) {
+				bphy_err(drvr, "Could not get pkt cnts (%d)\n",
+					 err);
+				err = 0;
+			} else {
+				sinfo->filled |=
+					BIT_ULL(NL80211_STA_INFO_RX_PACKETS) |
+					BIT_ULL(NL80211_STA_INFO_RX_DROP_MISC) |
+					BIT_ULL(NL80211_STA_INFO_TX_PACKETS) |
+					BIT_ULL(NL80211_STA_INFO_TX_FAILED);
+				sinfo->rx_packets =
+					le32_to_cpu(pktcnt.rx_good_pkt);
+				sinfo->rx_dropped_misc =
+					le32_to_cpu(pktcnt.rx_bad_pkt);
+				sinfo->tx_packets =
+					le32_to_cpu(pktcnt.tx_good_pkt);
+				sinfo->tx_failed =
+					le32_to_cpu(pktcnt.tx_bad_pkt);
 			}
 		}
 	}
