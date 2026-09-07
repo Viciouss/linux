@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Samsung's Galaxy Note 10.1 - N8020 (lte version)
+ *
+ * Copyright (c) 2013 Samsung Electronics Co., Ltd.
+ *		http://www.samsung.com
+ */
+
+/dts-v1/;
+#include "exynos4412-p4note.dtsi"
+
+/ {
+	model = "Samsung Galaxy Note 10.1 (GT-N8020) based on Exynos4412";
+	compatible = "samsung,n8020", "samsung,p4note", "samsung,exynos4412", "samsung,exynos4";
+
+	chosen {
+		bootargs = "root=/dev/ram0 rw ramdisk=8192 initrd=0x42000000,8M init=/init androidboot.selinux=permissive androidboot.hardware=smdk4x12";
+	};
+	/* this is the lte variant */
+};
