@@ -197,9 +197,11 @@ dtb-$(CONFIG_ARCH_EXYNOS4) += \
 	exynos4412-odroidx.dtb \
 	exynos4412-odroidx2.dtb \
 	exynos4412-origen.dtb \
+	exynos4412-p4note-n8000-android.dtb \
 	exynos4412-p4note-n8010.dtb \
 	exynos4412-p4note-n8010-buildroot.dtb \
 	exynos4412-p4note-n8010-android.dtb \
+	exynos4412-p4note-n8020-android.dtb \
 	exynos4412-smdk4412.dtb \
 	exynos4412-tiny4412.dtb \
 	exynos4412-trats2.dtb
