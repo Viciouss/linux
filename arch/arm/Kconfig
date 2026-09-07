@@ -1779,6 +1779,20 @@ config ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND
 
 endchoice
 
+config BUILD_ARM_APPENDED_DTB_IMAGE
+	bool "Build a concatenated zImage/dtb by default"
+	depends on ARM_APPENDED_DTB
+	help
+	  Enabling this option will cause a concatenated zImage and DTB to
+	  be built by default (instead of a standalone zImage). The image
+	  will built in arch/arm/boot/zImage-dtb.
+
+config BUILD_ARM_APPENDED_DTB_IMAGE_NAME
+	string "Appended dtb name"
+	depends on BUILD_ARM_APPENDED_DTB_IMAGE
+	help
+	  Name of the dtb to append when building a concatenated zImage-dtb.
+
 config CMDLINE
 	string "Default kernel command string"
 	default ""

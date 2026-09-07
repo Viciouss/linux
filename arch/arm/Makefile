@@ -324,6 +324,20 @@ $(BOOT_TARGETS): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $(boot)/$@
 	@$(kecho) '  Kernel: $(boot)/$@ is ready'
 
+# Refuse to build an image with no appended dtb. This is a recipe-time check
+# rather than a parse-time $(error): CONFIG_* come from include/config/auto.conf,
+# which kbuild only re-syncs during the build, so at parse time a correct
+# .config can still look empty. Listed first so it fails within seconds.
+PHONY += check_appended_dtb_name
+check_appended_dtb_name:
+	@test -n '$(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAME))' || { \
+		echo "ERROR: CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAME is empty."          >&2; \
+		exit 1; }
+
+zImage-dtb: check_appended_dtb_name vmlinux scripts dtbs
+	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $(boot)/$@
+	@$(kecho) '  Kernel: $(boot)/$@ is ready'
+
 $(INSTALL_TARGETS):
 	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $@
 
@@ -348,6 +362,8 @@ define archhelp
   echo  '  uImage        - U-Boot wrapped zImage'
   echo  '  bootpImage    - Combined zImage and initial RAM disk'
   echo  '                  (supply initrd image via make variable INITRD=<path>)'
+  echo  '  zImage-dtb    - zImage with an appended dtb (arch/$(ARCH)/boot/zImage-dtb)'
+  echo  '                  (dtb selected by CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAME)'
   echo  '  install       - Install uncompressed kernel'
   echo  '  zinstall      - Install compressed kernel'
   echo  '  uinstall      - Install U-Boot wrapped compressed kernel'

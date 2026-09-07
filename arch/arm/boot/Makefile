@@ -27,7 +27,12 @@ INITRD_PHYS := $(initrd_phys-y)
 
 export ZRELADDR INITRD_PHYS PARAMS_PHYS
 
-targets := Image zImage xipImage bootpImage uImage
+targets := Image zImage xipImage bootpImage uImage zImage-dtb
+
+# Device tree blob to append to zImage-dtb, selected by the defconfig
+DTB_NAME := $(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAME))
+FULL_DTB_NAME := $(addsuffix .dtb,$(DTB_NAME))
+DTB_RESULT := $(addprefix $(obj)/dts/,$(FULL_DTB_NAME))
 
 ifeq ($(CONFIG_XIP_KERNEL),y)
 
@@ -65,6 +70,12 @@ $(obj)/compressed/vmlinux: $(obj)/Image FORCE
 
 $(obj)/zImage:	$(obj)/compressed/vmlinux FORCE
 	$(call if_changed,objcopy)
+
+$(obj)/zImage-dtb:	$(obj)/zImage $(DTB_RESULT) FORCE
+ifeq ($(DTB_NAME),)
+	$(error zImage-dtb: CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAME is empty, refusing to build an image with no appended dtb)
+endif
+	$(call if_changed,cat)
 
 endif
 
