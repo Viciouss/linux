@@ -1,4 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 config TRACE_GPU_MEM
-	bool
+	bool "GPU memory tracepoints"
+	help
+	  Enable the gpu_mem_total tracepoint. Android VINTF requires
+	  CONFIG_TRACE_GPU_MEM=y from FCM level 6 (Android 12) onwards;
+	  without a prompt this symbol can only be reached via "select",
+	  so it cannot be turned on from a defconfig.
