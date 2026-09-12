@@ -49,6 +49,7 @@
 #define CFG_CURRENT_LIMIT_USB_MASK		0x0f
 
 #define CFG_VARIOUS_FUNCTIONS			0x02
+#define CFG_AICL_STATE				BIT(5)
 
 #define CFG_FLOAT_VOLTAGE			0x03
 #define CFG_FLOAT_VOLTAGE_FLOAT_MASK		0x3f
@@ -1785,6 +1786,9 @@ static int smb347_probe(struct i2c_client *client,
 		smb347_irq_disable(smb);
 		return PTR_ERR(smb->usb_rdev);
 	}
+
+	if (smb->edev)
+		extcon_cable_worker(smb);
 
 	return 0;
 }
