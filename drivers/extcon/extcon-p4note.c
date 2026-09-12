@@ -306,9 +306,10 @@ void accessory_power(struct p4note_extcon_data *data, u8 token, bool active)
 
 		if (try_cnt <= max_try_cnt)
 			dev_info(data->dev, "enabled acc 5v in try %d", try_cnt);
-		else
+		else {
 			dev_err(data->dev, "failed to enable the accessory_en");
-				gpiod_set_value(data->accessory_enable, 0);
+			gpiod_set_value(data->accessory_enable, 0);
+		}
 	} else {
 		if (token == 0) {
 			gpiod_set_value(data->accessory_enable, 0);
@@ -643,11 +644,17 @@ static void read_charger_adc_worker(struct work_struct *work)
 
 	int err = 0;
 	int adc_val = 0;
+	int adc_val_2 = 0;
 	int condition_counter = 0;
 
 	mutex_lock(&data->usb_mutex);
 	usb_switch_set_path(data, USB_PATH_ADCCHECK);
+
+	usleep_range(30000, 40000);
+
 	err = iio_read_channel_processed(data->charger_iio_chan, &adc_val);
+	if (!err)
+		err = iio_read_channel_processed(data->charger_iio_chan, &adc_val_2);
 	usb_switch_clr_path(data, USB_PATH_ADCCHECK);
 	mutex_unlock(&data->usb_mutex);
 
@@ -655,6 +662,8 @@ static void read_charger_adc_worker(struct work_struct *work)
 		dev_info(data->dev, "error reading the adc value for the charger: %d\n", err);
 		return;
 	}
+
+	adc_val = (adc_val + adc_val_2) / 2;
 
 	dev_dbg(data->dev, "read charger adc value = %d\n", adc_val);
 
