@@ -1212,6 +1212,16 @@ config VIDEO_S5K6A3
 	  This is a V4L2 sensor driver for Samsung S5K6A3 raw
 	  camera sensor.
 
+config VIDEO_ISX012
+	tristate "Sony ISX012 sensor support"
+	depends on I2C && VIDEO_V4L2
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  This is a V4L2 sensor driver for the Sony ISX012 5M
+	  camera sensor, as used for the rear camera on the
+	  Samsung GT-N8000.
+
 config VIDEO_S5K4ECGX
 	tristate "Samsung S5K4ECGX sensor support"
 	depends on I2C && VIDEO_V4L2
