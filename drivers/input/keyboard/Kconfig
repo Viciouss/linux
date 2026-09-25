@@ -550,6 +550,18 @@ config KEYBOARD_PXA27x
 	  To compile this driver as a module, choose M here: the
 	  module will be called pxa27x_keypad.
 
+config KEYBOARD_P4NOTE_DOCK
+	tristate "Samsung Galaxy Note 10.1 (p4note) keyboard dock"
+	depends on SERIAL_DEV_BUS && EXTCON && OF
+	help
+	  Say Y here to enable support for the keyboard dock of the Samsung
+	  Galaxy Note 10.1 (GT-N80xx), connected through the 30-pin dock
+	  connector. It also tells the desk dock (MHL) apart from the
+	  keyboard dock.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called p4note-kbd-dock.
+
 config KEYBOARD_PMIC8XXX
 	tristate "Qualcomm PMIC8XXX keypad support"
 	depends on MFD_PM8XXX
