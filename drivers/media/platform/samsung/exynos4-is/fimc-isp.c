@@ -324,27 +324,14 @@ static int fimc_isp_subdev_s_power(struct v4l2_subdev *sd, int on)
 
 		ret = fimc_is_hw_initialize(is);
 	} else {
-		/* Close sensor */
-		if (!test_bit(IS_ST_PWR_ON, &is->state)) {
-			fimc_is_hw_close_sensor(is, 0);
-
-			ret = fimc_is_wait_event(is, IS_ST_OPEN_SENSOR, 0,
-						 FIMC_IS_CONFIG_TIMEOUT);
-			if (ret < 0) {
-				v4l2_err(sd, "sensor close timeout\n");
-				return ret;
-			}
-		}
-
 		/* SUB IP power off */
 		if (test_bit(IS_ST_PWR_SUBIP_ON, &is->state)) {
 			fimc_is_hw_subip_power_off(is);
 			ret = fimc_is_wait_event(is, IS_ST_PWR_SUBIP_ON, 0,
 						 FIMC_IS_CONFIG_TIMEOUT);
-			if (ret < 0) {
-				v4l2_err(sd, "sub-IP power off timeout\n");
-				return ret;
-			}
+			if (ret < 0)
+				v4l2_warn(sd, "sub-IP power off timeout, forcing CPU power-off\n");
+			ret = 0;
 		}
 
 		fimc_is_cpu_set_power(is, 0);

@@ -237,7 +237,6 @@ static int __fimc_pipeline_open(struct exynos_media_pipeline *ep,
 
 	sd = p->subdevs[IDX_SENSOR];
 	if (sd == NULL) {
-		pr_warn("%s(): No sensor subdev\n", __func__);
 		/*
 		 * Pipeline open cannot fail so as to make it possible
 		 * for the user space to configure the pipeline.
@@ -262,7 +261,6 @@ static int __fimc_pipeline_close(struct exynos_media_pipeline *ep)
 	int ret;
 
 	if (sd == NULL) {
-		pr_warn("%s(): No sensor subdev\n", __func__);
 		return 0;
 	}
 
@@ -353,11 +351,11 @@ static int __fimc_pipeline_s_stream(struct exynos_media_pipeline *ep, bool on)
 
 	return 0;
 error:
-	fimc_pipeline_s_power(p, !on);
-	for (; i >= 0; i--) {
+	for (i--; i >= 0; i--) {
 		unsigned int idx = seq[on][i];
 		v4l2_subdev_call(p->subdevs[idx], video, s_stream, !on);
 	}
+	fimc_pipeline_s_power(p, !on);
 	return ret;
 }
 
