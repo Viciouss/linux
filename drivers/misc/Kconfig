@@ -5,6 +5,17 @@
 
 menu "Misc devices"
 
+config IR_REMOCON_MC96
+	tristate "ABOV MC96 IR LED remote control driver"
+	depends on I2C && REGULATOR
+	help
+	  Say Y here to enable support for the ABOV MC96FR based IR
+	  blaster ("universal remote") found on the Samsung GT-N8000
+	  family of tablets.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called ir_remote_con_mc96.
+
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT
