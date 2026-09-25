@@ -150,7 +150,6 @@ void fimc_is_hw_stream_off(struct fimc_is *is);
 int fimc_is_hw_set_param(struct fimc_is *is);
 int fimc_is_hw_change_mode(struct fimc_is *is);
 
-void fimc_is_hw_close_sensor(struct fimc_is *is, unsigned int index);
 void fimc_is_hw_get_setfile_addr(struct fimc_is *is);
 void fimc_is_hw_load_setfile(struct fimc_is *is);
 void fimc_is_hw_subip_power_off(struct fimc_is *is);

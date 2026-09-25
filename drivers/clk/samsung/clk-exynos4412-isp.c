@@ -34,6 +34,29 @@ static const unsigned long exynos4x12_clk_isp_save[] __initconst = {
 	E4X12_GATE_ISP1,
 };
 
+static const unsigned int exynos4x12_isp_mux_child_ids[] = {
+	CLK_ISP_DIV_ISP0,	/* parent: aclk200 */
+	CLK_ISP_DIV_MCUISP0,	/* parent: aclk400_mcuisp */
+};
+
+static void exynos4x12_isp_restore_parents(struct samsung_clk_provider *ctx)
+{
+	struct clk_hw *hw, *parent;
+	int i, index;
+
+	for (i = 0; i < ARRAY_SIZE(exynos4x12_isp_mux_child_ids); i++) {
+		hw = ctx->clk_data.hws[exynos4x12_isp_mux_child_ids[i]];
+		if (IS_ERR_OR_NULL(hw))
+			continue;
+		parent = clk_hw_get_parent(hw);
+		if (!parent)
+			continue;
+		index = clk_hw_get_parent_index(parent);
+		if (index >= 0)
+			clk_mux_ops.set_parent(parent, index);
+	}
+};
+
 static struct samsung_div_clock exynos4x12_isp_div_clks[] = {
 	DIV(CLK_ISP_DIV_ISP0, "div_isp0", "aclk200", E4X12_DIV_ISP0, 0, 3),
 	DIV(CLK_ISP_DIV_ISP1, "div_isp1", "aclk200", E4X12_DIV_ISP0, 4, 3),
@@ -102,6 +125,7 @@ static int __maybe_unused exynos4x12_isp_clk_resume(struct device *dev)
 
 	samsung_clk_restore(ctx->reg_base, exynos4x12_save_isp,
 			    ARRAY_SIZE(exynos4x12_clk_isp_save));
+	exynos4x12_isp_restore_parents(ctx);
 	return 0;
 }
 

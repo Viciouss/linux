@@ -1188,7 +1188,7 @@ static int fimc_lite_subdev_s_stream(struct v4l2_subdev *sd, int on)
 {
 	struct fimc_lite *fimc = v4l2_get_subdevdata(sd);
 	unsigned long flags;
-	int ret;
+	int ret = 0;
 
 	/*
 	 * Find sensor subdev linked to FIMC-LITE directly or through
@@ -1218,12 +1218,12 @@ static int fimc_lite_subdev_s_stream(struct v4l2_subdev *sd, int on)
 		flite_hw_capture_stop(fimc);
 		spin_unlock_irqrestore(&fimc->slock, flags);
 
-		ret = wait_event_timeout(fimc->irq_queue,
-				!test_bit(ST_FLITE_OFF, &fimc->state),
-				msecs_to_jiffies(200));
-		if (ret == 0)
+		if (!wait_event_timeout(fimc->irq_queue,
+					!test_bit(ST_FLITE_OFF, &fimc->state),
+					msecs_to_jiffies(200)))
 			v4l2_err(sd, "s_stream(0) timeout\n");
 		clear_bit(ST_FLITE_RUN, &fimc->state);
+		ret = 0;
 	}
 
 	mutex_unlock(&fimc->lock);
