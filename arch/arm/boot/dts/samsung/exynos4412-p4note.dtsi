@@ -15,6 +15,8 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/linux-event-codes.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/pinctrl/samsung.h>
 #include <dt-bindings/power/summit,smb347-charger.h>
 #include "exynos-pinctrl.h"
 
@@ -33,7 +35,6 @@
 	};
 
 	chosen {
-		stdout-path = &serial_2;
 	};
 
 	firmware@204f000 {
@@ -141,6 +142,34 @@
 		regulator-always-on;
 	};
 
+	flash_vdd: voltage-regulator-7 {
+		compatible = "regulator-fixed";
+		regulator-name = "CAM_FLASH_VDD";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	cam_sensor_a_reg: voltage-regulator-8 {
+		compatible = "regulator-fixed";
+		regulator-name = "CAM_SENSOR_A";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		pinctrl-0 = <&cam_isx012_en>;
+		pinctrl-names = "default";
+		gpios = <&gpj0 5 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	pen_vdd: voltage-regulator-9 {
+		compatible = "regulator-fixed";
+		regulator-name = "PEN_LDO";
+		pinctrl-0 = <&pen_ldo_en>;
+		pinctrl-names = "default";
+		gpios = <&gpc1 1 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
 	wlan_pwrseq: sdhci3-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		reset-gpios = <&gpm3 5 GPIO_ACTIVE_LOW>;
@@ -157,6 +186,21 @@
 		precharge-current-microamp = <250000>;
 		charge-term-current-microamp = <250000>;
 		constant-charge-voltage-max-microvolt = <4200000>;
+	};
+
+	cam_flash: led-controller {
+		compatible = "sgmicro,sgm3140";
+		pinctrl-names = "default";
+		pinctrl-0 = <&cam_flash_en>;
+		flash-gpios = <&gpm3 7 GPIO_ACTIVE_HIGH>;
+		enable-gpios = <&gpm3 6 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&flash_vdd>;
+
+		led {
+			function = LED_FUNCTION_FLASH;
+			color = <LED_COLOR_ID_WHITE>;
+			flash-max-timeout-us = <250000>;
+		};
 	};
 
 	i2c-gpio-1 {
@@ -241,8 +285,6 @@
 		power_supply: charger@6 {
 			compatible = "summit,smb347";
 			reg = <0x6>;
-			pinctrl-0 = <&ta_enable>;
-			pinctrl-names = "default";
 			summit,enable-usb-charging;
 			summit,enable-charge-control = <SMB3XX_CHG_ENABLE_SW>;
 			summit,fast-voltage-threshold-microvolt = <2600000>;
@@ -267,6 +309,54 @@
 		ambient_light_sensor@1c {
 			compatible = "dynaimage,al3201";
 			reg = <0x1c>;
+		};
+	};
+
+	i2c-gpio-6 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpy0 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpy0 1 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ir-blaster@50 {
+			compatible = "abov,mc96";
+			reg = <0x50>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&irda_wake &irda_ack>;
+			wake-gpios = <&gpl0 3 GPIO_ACTIVE_HIGH>;
+			ack-gpios = <&gpm0 6 GPIO_ACTIVE_HIGH>;
+			vdd-supply = <&ldo9_reg>;
+		};
+	};
+
+	i2c-gpio-7 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpm1 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpm1 1 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		haptic-engine@48 {
+			compatible = "imagis,isa1200";
+			reg = <0x48>;
+
+			pwms = <&pwm 0 38675 0>;
+			control-gpios = <&gpl2 4 GPIO_ACTIVE_HIGH>;
+
+			imagis,clk-div = <128>;
+			imagis,pll-div = <2>;
+			imagis,mode = <0>; /* LRA_MODE */
+			imagis,duty-cycle-ns = <38636>;
+
+			ldo {
+				regulator-name = "vdd_vib";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+			};
 		};
 	};
 
@@ -450,6 +540,47 @@
 	};
 };
 
+&csis_0 {
+	status = "okay";
+	vddcore-supply = <&ldo8_reg>;
+	vddio-supply = <&ldo10_reg>;
+	assigned-clocks = <&clock CLK_MOUT_CSIS0>,
+			<&clock CLK_SCLK_CSIS0>;
+	assigned-clock-parents = <&clock CLK_MOUT_MPLL_USER_T>;
+	assigned-clock-rates = <0>, <176000000>;
+
+	/* Camera C (3) MIPI CSI-2 (CSIS0) */
+	port@3 {
+		reg = <3>;
+		csis0_ep: endpoint {
+			remote-endpoint = <&isx012_ep>;
+			data-lanes = <1 2>;
+			samsung,csis-hs-settle = <12>;
+		};
+	};
+};
+
+&csis_1 {
+	status = "okay";
+	vddcore-supply = <&ldo8_reg>;
+	vddio-supply = <&ldo10_reg>;
+	assigned-clocks = <&clock CLK_MOUT_CSIS1>,
+			<&clock CLK_SCLK_CSIS1>;
+	assigned-clock-parents = <&clock CLK_MOUT_MPLL_USER_T>;
+	assigned-clock-rates = <0>, <176000000>;
+
+	/* Camera D (4) MIPI CSI-2 (CSIS1) */
+	port@4 {
+		reg = <4>;
+		csis1_ep: endpoint {
+			remote-endpoint = <&is_s5k6a3_ep>;
+			data-lanes = <1>;
+			samsung,csis-hs-settle = <18>;
+			samsung,csis-wclk;
+		};
+	};
+};
+
 &exynos_usbphy {
 	status = "okay";
 };
@@ -485,6 +616,19 @@
 	assigned-clock-parents = <&clock CLK_MOUT_MPLL_USER_T>;
 	assigned-clock-rates = <0>, <166750000>;
 };
+
+&fimc_is {
+	status = "okay";
+};
+
+&fimc_lite_0 {
+	status = "okay";
+};
+
+&fimc_lite_1 {
+	status = "okay";
+};
+
 
 &fimd {
 	pinctrl-0 = <&lcd_clk &lcd_data24>;
@@ -524,6 +668,39 @@
 	phy-names = "host";
 };
 
+&i2c_0 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c0_bus>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	isx012@3d {
+		compatible = "sony,isx012";
+		reg = <0x3d>;
+		reset-gpios = <&gpl1 1 GPIO_ACTIVE_LOW>;
+		standby-gpios = <&gpj0 7 GPIO_ACTIVE_LOW>;
+		pinctrl-0 = <&cam_isx012_nrst &cam_isx012_nstby>;
+		pinctrl-names = "default";
+		vddcore-supply = <&buck9_reg>;
+		vddio-supply = <&ldo18_reg>;
+		vdda-supply = <&cam_sensor_a_reg>;
+		vddaf-supply = <&ldo26_reg>;
+		clock-frequency = <24000000>;
+		/* CAM_A_CLKOUT */
+		clocks = <&camera 0>;
+		clock-names = "extclk";
+
+		port {
+			isx012_ep: endpoint {
+				remote-endpoint = <&csis0_ep>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
 &i2c_1 {
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-slave-addr = <0x10>;
@@ -552,6 +729,34 @@
 		mount-matrix =	"1",  "0",  "0",
 				"0", "-1",  "0",
 				"0",  "0", "-1";
+	};
+};
+
+&i2c1_isp {
+	pinctrl-0 = <&fimc_is_i2c1>;
+	pinctrl-names = "default";
+
+	s5k6a3@10 {
+		compatible = "samsung,s5k6a3";
+		reg = <0x10>;
+		pinctrl-0 = <&cam_vt_nrst>;
+		pinctrl-names = "default";
+		svdda-supply = <&ldo24_reg>;
+		svddio-supply = <&ldo19_reg>;
+		afvdd-supply = <&ldo19_reg>;
+		clock-frequency = <24000000>;
+		/* CAM_B_CLKOUT */
+		clocks = <&camera 1>;
+		clock-names = "extclk";
+		samsung,camclk-out = <1>;
+		gpios = <&gpj1 0 GPIO_ACTIVE_HIGH>;
+
+		port {
+			is_s5k6a3_ep: endpoint {
+				remote-endpoint = <&csis1_ep>;
+				data-lanes = <1>;
+			};
+		};
 	};
 };
 
@@ -610,6 +815,27 @@
 		wlf,ldo1ena-gpios = <&gpm4 4 GPIO_ACTIVE_HIGH>;
 		wlf,ldo2ena-gpios = <&gpm4 4 GPIO_ACTIVE_HIGH>;
 		wlf,ldoena-always-driven;
+	};
+};
+
+&i2c_6 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-slave-addr = <0x10>;
+	samsung,i2c-max-bus-freq = <400000>;
+	pinctrl-0 = <&i2c6_bus>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	digitizer@56 {
+		compatible = "wacom,g5sp";
+		reg = <0x56>;
+		pinctrl-0 = <&pen_irq &pen_pdct &pen_insert>;
+		pinctrl-names = "default";
+		interrupt-parent = <&gpc1>;
+		interrupts = <2 IRQ_TYPE_EDGE_RISING>;
+		pdct-gpios = <&gpc1 0 GPIO_ACTIVE_LOW>;
+		pen-insert-gpios = <&gpx1 5 GPIO_ACTIVE_LOW>;
+		vdd-supply = <&pen_vdd>;
 	};
 };
 
@@ -978,6 +1204,48 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
+	cam_vt_nrst: cam-vt-nrst-pins {
+		samsung,pins = "gpj1-0";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	cam_isx012_nrst: cam-isx012-nrst-pins {
+		samsung,pins = "gpl1-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	cam_isx012_nstby: cam-isx012-nstby-pins {
+		samsung,pins = "gpj0-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	cam_isx012_en: cam-isx012-en-pins {
+		samsung,pins = "gpj0-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	pen_pdct: pen-pdct-pins {
+		samsung,pins = "gpc1-0";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+	};
+
+	pen_ldo_en: pen-ldo-en-pins {
+		samsung,pins = "gpc1-1";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	pen_irq: pen-irq-pins {
+		samsung,pins = "gpc1-2";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+	};
+
 	sleep0: sleep-states {
 		PIN_SLP(gpa0-0, INPUT, NONE);
 		PIN_SLP(gpa0-1, OUT0, NONE);
@@ -1137,6 +1405,18 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
+	irda_wake: irda-wake-pins {
+		samsung,pins = "gpl0-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	irda_ack: irda-ack-pins {
+		samsung,pins = "gpm0-6";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+	};
+
 	tsp_irq: tsp-irq-pins {
 		samsung,pins = "gpm2-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
@@ -1149,8 +1429,8 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
-	ta_enable: ta-enable {
-		samsung,pins = "gpm4-2";
+	cam_flash_en: cam-flash-en-pins {
+		samsung,pins = "gpm3-6", "gpm3-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
@@ -1214,6 +1494,12 @@
 		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	pen_insert: pen-insert-pins {
+		samsung,pins = "gpx1-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_F>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
 	};
 
 	gpio_keys: gpio-keys {
@@ -1512,9 +1798,9 @@
 };
 
 &pwm {
-	pinctrl-0 = <&pwm1_out>;
+	pinctrl-0 = <&pwm0_out &pwm1_out>;
 	pinctrl-names = "default";
-	samsung,pwm-outputs = <1>;
+	samsung,pwm-outputs = <0>, <1>;
 	status = "okay";
 };
 
@@ -1578,6 +1864,11 @@
 	pinctrl-0 = <&uart_sel>;
 	pinctrl-names = "default";
 	status = "okay";
+
+	keyboard_dock: keyboard-dock {
+		compatible = "samsung,p4note-keyboard-dock";
+		extcon = <&extcon_p4note>;
+	};
 };
 
 &tmu {
