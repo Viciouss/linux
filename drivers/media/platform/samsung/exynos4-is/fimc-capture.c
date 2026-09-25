@@ -19,6 +19,7 @@
 
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-mem2mem.h>
 #include <media/v4l2-rect.h>
@@ -667,7 +668,7 @@ static void fimc_capture_try_selection(struct fimc_ctx *ctx,
 		min_sz = var->min_out_pixsize;
 	} else {
 		u32 depth = fimc_get_format_depth(sink->fmt);
-		align_sz = 64/ALIGN(depth, 8);
+		align_sz = depth ? 64 / ALIGN(depth, 8) : 0;
 		min_sz = var->min_inp_pixsize;
 		min_w = min_h = min_sz;
 		max_sc_h = max_sc_v = 1;
@@ -1356,6 +1357,9 @@ static const struct v4l2_ioctl_ops fimc_capture_ioctl_ops = {
 	.vidioc_enum_input		= fimc_cap_enum_input,
 	.vidioc_s_input			= fimc_cap_s_input,
 	.vidioc_g_input			= fimc_cap_g_input,
+
+	.vidioc_subscribe_event		= v4l2_ctrl_subscribe_event,
+	.vidioc_unsubscribe_event	= v4l2_event_unsubscribe,
 };
 
 /* Capture subdev media entity operations */
@@ -1581,7 +1585,7 @@ static int fimc_subdev_get_selection(struct v4l2_subdev *sd,
 	struct fimc_ctx *ctx = fimc->vid_cap.ctx;
 	struct fimc_frame *f = &ctx->s_frame;
 	struct v4l2_rect *r = &sel->r;
-	struct v4l2_rect *try_sel;
+	struct v4l2_rect *try_sel = NULL;
 
 	if (sel->pad == FIMC_SD_PAD_SOURCE)
 		return -EINVAL;
@@ -1601,10 +1605,12 @@ static int fimc_subdev_get_selection(struct v4l2_subdev *sd,
 		return 0;
 
 	case V4L2_SEL_TGT_CROP:
-		try_sel = v4l2_subdev_get_try_crop(sd, sd_state, sel->pad);
+		if (sel->which == V4L2_SUBDEV_FORMAT_TRY)
+			try_sel = v4l2_subdev_get_try_crop(sd, sd_state, sel->pad);
 		break;
 	case V4L2_SEL_TGT_COMPOSE:
-		try_sel = v4l2_subdev_get_try_compose(sd, sd_state, sel->pad);
+		if (sel->which == V4L2_SUBDEV_FORMAT_TRY)
+			try_sel = v4l2_subdev_get_try_compose(sd, sd_state, sel->pad);
 		f = &ctx->d_frame;
 		break;
 	default:
@@ -1637,7 +1643,7 @@ static int fimc_subdev_set_selection(struct v4l2_subdev *sd,
 	struct fimc_ctx *ctx = fimc->vid_cap.ctx;
 	struct fimc_frame *f = &ctx->s_frame;
 	struct v4l2_rect *r = &sel->r;
-	struct v4l2_rect *try_sel;
+	struct v4l2_rect *try_sel = NULL;
 	unsigned long flags;
 
 	if (sel->pad == FIMC_SD_PAD_SOURCE)
@@ -1648,10 +1654,12 @@ static int fimc_subdev_set_selection(struct v4l2_subdev *sd,
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP:
-		try_sel = v4l2_subdev_get_try_crop(sd, sd_state, sel->pad);
+		if (sel->which == V4L2_SUBDEV_FORMAT_TRY)
+			try_sel = v4l2_subdev_get_try_crop(sd, sd_state, sel->pad);
 		break;
 	case V4L2_SEL_TGT_COMPOSE:
-		try_sel = v4l2_subdev_get_try_compose(sd, sd_state, sel->pad);
+		if (sel->which == V4L2_SUBDEV_FORMAT_TRY)
+			try_sel = v4l2_subdev_get_try_compose(sd, sd_state, sel->pad);
 		f = &ctx->d_frame;
 		break;
 	default:
