@@ -1205,6 +1205,16 @@ config VIDEO_ISL7998X
 	  Support for Intersil ISL7998x analog to MIPI-CSI2 or
 	  BT.656 decoder.
 
+config VIDEO_ISX012
+	tristate "Sony ISX012 sensor support"
+	depends on I2C && VIDEO_V4L2
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  This is a V4L2 sensor driver for the Sony ISX012 5M
+	  camera sensor, as used for the rear camera on the
+	  Samsung GT-N8000.
+
 config VIDEO_KS0127
 	tristate "KS0127 video decoder"
 	depends on VIDEO_DEV && I2C
