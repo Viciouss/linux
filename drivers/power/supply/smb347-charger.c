@@ -14,6 +14,7 @@
 #include <linux/gpio.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/notifier.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -35,64 +36,137 @@
  * Configuration registers. These are mirrored to volatile RAM and can be
  * written once %CMD_A_ALLOW_WRITE is set in %CMD_A register. They will be
  * reloaded from non-volatile registers after POR.
+ *
+ * Bits that this driver does not use are listed for reference. Their
+ * descriptions come from the register map in the Kindle Fire (otter)
+ * summit_smb347 driver and from the Samsung p4note vendor driver.
  */
 #define CFG_CHARGE_CURRENT			0x00
-#define CFG_CHARGE_CURRENT_FCC_MASK		0xe0
+#define CFG_CHARGE_CURRENT_FCC_MASK		0xe0	/* fast charge, fcc_tbl */
 #define CFG_CHARGE_CURRENT_FCC_SHIFT		5
-#define CFG_CHARGE_CURRENT_PCC_MASK		0x18
+#define CFG_CHARGE_CURRENT_PCC_MASK		0x18	/* pre-charge, pcc_tbl */
 #define CFG_CHARGE_CURRENT_PCC_SHIFT		3
-#define CFG_CHARGE_CURRENT_TC_MASK		0x07
+#define CFG_CHARGE_CURRENT_TC_MASK		0x07	/* termination, tc_tbl */
 
 #define CFG_CURRENT_LIMIT			0x01
-#define CFG_CURRENT_LIMIT_DC_MASK		0xf0
+#define CFG_CURRENT_LIMIT_DC_MASK		0xf0	/* DCIN, icl_tbl */
 #define CFG_CURRENT_LIMIT_DC_SHIFT		4
-#define CFG_CURRENT_LIMIT_USB_MASK		0x0f
+#define CFG_CURRENT_LIMIT_USB_MASK		0x0f	/* USBIN in HC mode, icl_tbl */
 
 #define CFG_VARIOUS_FUNCTIONS			0x02
-#define CFG_AICL_STATE				BIT(5)
+/* input FET suspend: 0 = SUSP pin, 1 = CMD_A_SUSPEND_ENABLED */
+#define CFG_VARIOUS_FUNCTIONS_SUSPEND_BY_REG	BIT(7)
+#define CFG_VARIOUS_FUNCTIONS_BAT_TO_SYS_OFF	BIT(6)
+/* maximum system voltage: 0 = float + 100mV, 1 = float + 200mV */
+#define CFG_VARIOUS_FUNCTIONS_SYS_200MV		BIT(5)
+/* automatic input current limit */
+#define CFG_VARIOUS_FUNCTIONS_AICL		BIT(4)
+/* AICL input voltage threshold: 0 = 4.25V, 1 = 4.5V */
+#define CFG_VARIOUS_FUNCTIONS_AICL_4500MV	BIT(3)
+/* input priority when both are valid: 0 = DCIN, 1 = USBIN */
+#define CFG_VARIOUS_FUNCTIONS_USBIN_FIRST	BIT(2)
+/* battery overvoltage ends the charge cycle */
+#define CFG_VARIOUS_FUNCTIONS_BAT_OV_END	BIT(1)
+#define CFG_VARIOUS_FUNCTIONS_VCHG		BIT(0)
 
 #define CFG_FLOAT_VOLTAGE			0x03
-#define CFG_FLOAT_VOLTAGE_FLOAT_MASK		0x3f
-#define CFG_FLOAT_VOLTAGE_THRESHOLD_MASK	0xc0
+#define CFG_FLOAT_VOLTAGE_FLOAT_MASK		0x3f	/* 3.5V + n * 20mV */
+#define CFG_FLOAT_VOLTAGE_THRESHOLD_MASK	0xc0	/* 2.4V + n * 200mV */
 #define CFG_FLOAT_VOLTAGE_THRESHOLD_SHIFT	6
 
 #define CFG_CHARGE_CONTROL			0x04
+#define CFG_CHARGE_CONTROL_AUTO_RECHARGE_DISABLED	BIT(7)
+#define CFG_CHARGE_CONTROL_TERMINATION_DISABLED	BIT(6)
+/* battery missing detection: off, every 3s, once, via THERM */
+#define CFG_CHARGE_CONTROL_BMD_MASK		0x30
+/* automatic recharge threshold: 0 = float - 50mV, 1 = float - 100mV */
+#define CFG_CHARGE_CONTROL_RECHARGE_100MV	BIT(3)
+/* automatic power source detection */
 #define CFG_APSD				BIT(2)
+/* non-conforming charger detection via APSD */
+#define CFG_CHARGE_CONTROL_NC_APSD		BIT(1)
+/* secondary input accepted while the primary input is in OVLO */
+#define CFG_CHARGE_CONTROL_SEC_INPUT_OVLO	BIT(0)
 
 #define CFG_STAT				0x05
-#define CFG_STAT_DISABLED			BIT(5)
 #define CFG_STAT_ACTIVE_HIGH			BIT(7)
+/* STAT output mode: 0 = charging state, 1 = USB fail */
+#define CFG_STAT_USB_FAIL			BIT(6)
+#define CFG_STAT_DISABLED			BIT(5)
+/* non-conforming charger input limit: 0 = 100mA, 1 = HC setting */
+#define CFG_STAT_NC_INPUT_HC			BIT(4)
+/* complete charge timeout: 382min, 764min, 1527min, disabled */
+#define CFG_STAT_CC_TIMEOUT_MASK		0x0c
+#define CFG_STAT_CC_TIMEOUT_SHIFT		2
+#define CFG_STAT_CC_TIMEOUT_DISABLED		3
+/* pre-charge timeout: 48min, 95min, 191min, disabled */
+#define CFG_STAT_PC_TIMEOUT_MASK		0x03
 
 #define CFG_PIN					0x06
+#define CFG_PIN_LED_BLINK			BIT(7)
+/* charge enable: 0x00/0x20 = I2C (CMD_A_CHG_ENABLED), 0x40/0x60 = EN pin */
 #define CFG_PIN_EN_CTRL_MASK			0x60
 #define CFG_PIN_EN_CTRL_ACTIVE_HIGH		0x40
 #define CFG_PIN_EN_CTRL_ACTIVE_LOW		0x60
-#define CFG_PIN_EN_APSD_IRQ			BIT(1)
-#define CFG_PIN_EN_CHARGER_ERROR		BIT(2)
+/*
+ * The Kindle Fire register map and the Samsung vendor driver describe
+ * bit 4 as the USB5/1/HC mode control: 0 = CMD_B, 1 = USB5/1 and HC pins.
+ * The pin controlled charge enable sets it as CFG_PIN_EN_CTRL.
+ */
 #define CFG_PIN_EN_CTRL				BIT(4)
+#define CFG_PIN_USB_HC_PIN_CTRL			BIT(4)
+/* USB5/1/HC input state: 0 = tri-state, 1 = dual-state */
+#define CFG_PIN_USB_HC_DUAL_STATE		BIT(3)
+#define CFG_PIN_EN_CHARGER_ERROR		BIT(2)
+#define CFG_PIN_EN_APSD_IRQ			BIT(1)
+#define CFG_PIN_DCIN_PRE_BIAS			BIT(0)
 
 #define CFG_THERM				0x07
-#define CFG_THERM_SOFT_HOT_COMPENSATION_MASK	0x03
-#define CFG_THERM_SOFT_HOT_COMPENSATION_SHIFT	0
+/* minimum system voltage: 0 = 3.45V, 1 = 3.6V */
+#define CFG_THERM_MIN_SYS_3600MV		BIT(6)
+/* thermistor monitor supply: 0 = USBIN, 1 = VDDCAP */
+#define CFG_THERM_MONITOR_VDDCAP		BIT(5)
+#define CFG_THERM_MONITOR_DISABLED		BIT(4)
+/* soft limit behaviour: none, current, float voltage, both */
 #define CFG_THERM_SOFT_COLD_COMPENSATION_MASK	0x0c
 #define CFG_THERM_SOFT_COLD_COMPENSATION_SHIFT	2
-#define CFG_THERM_MONITOR_DISABLED		BIT(4)
+#define CFG_THERM_SOFT_HOT_COMPENSATION_MASK	0x03
+#define CFG_THERM_SOFT_HOT_COMPENSATION_SHIFT	0
 
 #define CFG_SYSOK				0x08
-#define CFG_SYSOK_INOK_ACTIVE_HIGH		BIT(0)
+/* SYSOK pin: INOK, SYSOK A, SYSOK B, CHG_DET_N */
+#define CFG_SYSOK_MODE_MASK			0xc0
+/* USB input current limit: 0 = USB 2.0, 1 = USB 3.0 */
+#define CFG_SYSOK_USB3				BIT(5)
+/* float voltage compensation: 60mV, 120mV, 180mV, 240mV */
+#define CFG_SYSOK_FLOAT_COMPENSATION_MASK	0x18
 #define CFG_SYSOK_SUSPEND_HARD_LIMIT_DISABLED	BIT(2)
+#define CFG_SYSOK_PRE_TO_FAST_DISABLED		BIT(1)
+#define CFG_SYSOK_INOK_ACTIVE_HIGH		BIT(0)
 
 #define CFG_OTHER				0x09
+/*
+ * RID/OTG: 0x00 = RID off, OTG by I2C; 0x40 = RID off, OTG by pin;
+ * 0x80 = RID on, OTG by I2C; 0xc0 = RID on, automatic OTG
+ */
 #define CFG_OTHER_RID_MASK			0xc0
 #define CFG_OTHER_RID_ENABLED_AUTO_OTG		0xc0
+#define CFG_OTHER_OTG_PIN_ACTIVE_LOW		BIT(5)
+/* low battery/SYSOK voltage threshold, 0 = disabled */
+#define CFG_OTHER_LOW_BAT_MASK			0x0f
 
 #define CFG_OTG					0x0a
+#define CFG_OTG_CC_COMPENSATION_MASK		0xc0	/* ccc_tbl */
+#define CFG_OTG_CC_COMPENSATION_SHIFT		6
+/* chip thermal regulation: 100C, 110C, 120C, 130C */
 #define CFG_OTG_TEMP_THRESHOLD_MASK		0x30
 #define CFG_OTG_CURRENT_LIMIT_250mA		BIT(2)
 #define CFG_OTG_CURRENT_LIMIT_750mA		BIT(3)
 #define CFG_OTG_TEMP_THRESHOLD_SHIFT		4
-#define CFG_OTG_CC_COMPENSATION_MASK		0xc0
-#define CFG_OTG_CC_COMPENSATION_SHIFT		6
+/* OTG current limit at USBIN: 100mA, 250mA, 500mA, 750mA */
+#define CFG_OTG_CURRENT_LIMIT_MASK		0x0c
+/* OTG battery UVLO: 2.7V, 2.9V, 3.1V, 3.3V */
+#define CFG_OTG_BAT_UVLO_MASK			0x03
 
 #define CFG_TEMP_LIMIT				0x0b
 #define CFG_TEMP_LIMIT_SOFT_HOT_MASK		0x03
@@ -104,13 +178,28 @@
 #define CFG_TEMP_LIMIT_HARD_COLD_MASK		0xc0
 #define CFG_TEMP_LIMIT_HARD_COLD_SHIFT		6
 
+/* conditions that assert the interrupt */
 #define CFG_FAULT_IRQ				0x0c
+#define CFG_FAULT_IRQ_HARD_TEMP			BIT(7)
+#define CFG_FAULT_IRQ_SOFT_TEMP			BIT(6)
+#define CFG_FAULT_IRQ_OTG_BAT_UVLO		BIT(5)
+#define CFG_FAULT_IRQ_OTG_OVER_CURRENT		BIT(4)
+#define CFG_FAULT_IRQ_INPUT_OV			BIT(3)
 #define CFG_FAULT_IRQ_DCIN_UV			BIT(2)
+#define CFG_FAULT_IRQ_AICL_DONE			BIT(1)
+#define CFG_FAULT_IRQ_INTERNAL_TEMP		BIT(0)
 
 #define CFG_STATUS_IRQ				0x0d
-#define CFG_STATUS_IRQ_TERMINATION_OR_TAPER	BIT(4)
 #define CFG_STATUS_IRQ_CHARGE_TIMEOUT		BIT(7)
+#define CFG_STATUS_IRQ_OTG_DETECT		BIT(6)
+#define CFG_STATUS_IRQ_BAT_OV			BIT(5)
+#define CFG_STATUS_IRQ_TERMINATION_OR_TAPER	BIT(4)
+#define CFG_STATUS_IRQ_FAST_CHARGE		BIT(3)
+#define CFG_STATUS_IRQ_INOK			BIT(2)
+#define CFG_STATUS_IRQ_MISSING_BAT		BIT(1)
+#define CFG_STATUS_IRQ_LOW_BAT			BIT(0)
 
+/* bits 7:1 hold the I2C slave address */
 #define CFG_ADDRESS				0x0e
 
 /* Command registers */
@@ -119,40 +208,114 @@
 #define CMD_A_SUSPEND_ENABLED			BIT(2)
 #define CMD_A_OTG_ENABLED			BIT(4)
 #define CMD_A_ALLOW_WRITE			BIT(7)
+/*
+ * 0 = force the pre-charge current, 1 = allow the fast charge current.
+ * The p4note charges at the fast charge current with this bit cleared.
+ */
+#define CMD_A_FAST_CHARGE			BIT(6)
+#define CMD_A_ENABLE_OTG			BIT(4)
+#define CMD_A_BAT_TO_SYS_OFF			BIT(3)
+#define CMD_A_SUSPEND_ENABLED			BIT(2)
+#define CMD_A_CHG_ENABLED			BIT(1)
+#define CMD_A_STAT_DISABLED			BIT(0)
 #define CMD_B					0x31
-#define CMD_B_HIGH_CURRENT_MODE			BIT(0)
+/* reload the configuration from the non-volatile registers */
+#define CMD_B_POR				BIT(7)
+/* 0 = USB1 (100mA), 1 = USB5 (500mA) */
 #define CMD_B_USB500_MODE			BIT(1)
+/* 0 = USB1/USB5 mode, 1 = HC mode (CFG_CURRENT_LIMIT) */
+#define CMD_B_HIGH_CURRENT_MODE			BIT(0)
 #define CMD_C					0x33
 
-/* Interrupt Status registers */
+/* Interrupt Status registers, *_IRQ bits latch the change of *_STAT */
 #define IRQSTAT_A				0x35
+#define IRQSTAT_A_HOT_HARD_IRQ			BIT(7)
+#define IRQSTAT_A_HOT_HARD_STAT			BIT(6)
+#define IRQSTAT_A_COLD_HARD_IRQ			BIT(5)
+#define IRQSTAT_A_COLD_HARD_STAT		BIT(4)
+#define IRQSTAT_A_HOT_SOFT_IRQ			BIT(3)
+#define IRQSTAT_A_HOT_SOFT_STAT			BIT(2)
+#define IRQSTAT_A_COLD_SOFT_IRQ			BIT(1)
+#define IRQSTAT_A_COLD_SOFT_STAT		BIT(0)
+#define IRQSTAT_B				0x36
+#define IRQSTAT_B_BAT_OV_IRQ			BIT(7)
+#define IRQSTAT_B_BAT_OV_STAT			BIT(6)
+#define IRQSTAT_B_MISSING_BAT_IRQ		BIT(5)
+#define IRQSTAT_B_MISSING_BAT_STAT		BIT(4)
+#define IRQSTAT_B_LOW_BAT_IRQ			BIT(3)
+#define IRQSTAT_B_LOW_BAT_STAT			BIT(2)
+#define IRQSTAT_B_PRE_TO_FAST_IRQ		BIT(1)
+#define IRQSTAT_B_PRE_TO_FAST_STAT		BIT(0)
 #define IRQSTAT_C				0x37
-#define IRQSTAT_C_TERMINATION_STAT		BIT(0)
-#define IRQSTAT_C_TERMINATION_IRQ		BIT(1)
+#define IRQSTAT_C_INTERNAL_TEMP_IRQ		BIT(7)
+#define IRQSTAT_C_INTERNAL_TEMP_STAT		BIT(6)
+#define IRQSTAT_C_RECHARGE_IRQ			BIT(5)
+#define IRQSTAT_C_RECHARGE_STAT			BIT(4)
 #define IRQSTAT_C_TAPER_IRQ			BIT(3)
+#define IRQSTAT_C_TAPER_STAT			BIT(2)
+#define IRQSTAT_C_TERMINATION_IRQ		BIT(1)
+#define IRQSTAT_C_TERMINATION_STAT		BIT(0)
 #define IRQSTAT_D				0x38
-#define IRQSTAT_D_CHARGE_TIMEOUT_STAT		BIT(2)
+#define IRQSTAT_D_APSD_IRQ			BIT(7)
+#define IRQSTAT_D_APSD_STAT			BIT(6)
+#define IRQSTAT_D_AICL_IRQ			BIT(5)
+#define IRQSTAT_D_AICL_STAT			BIT(4)
 #define IRQSTAT_D_CHARGE_TIMEOUT_IRQ		BIT(3)
+#define IRQSTAT_D_CHARGE_TIMEOUT_STAT		BIT(2)
+#define IRQSTAT_D_PC_TIMEOUT_IRQ		BIT(1)
+#define IRQSTAT_D_PC_TIMEOUT_STAT		BIT(0)
 #define IRQSTAT_E				0x39
-#define IRQSTAT_E_USBIN_UV_STAT			BIT(0)
-#define IRQSTAT_E_USBIN_UV_IRQ			BIT(1)
-#define IRQSTAT_E_DCIN_UV_STAT			BIT(4)
+#define IRQSTAT_E_DCIN_OV_IRQ			BIT(7)
+#define IRQSTAT_E_DCIN_OV_STAT			BIT(6)
 #define IRQSTAT_E_DCIN_UV_IRQ			BIT(5)
+#define IRQSTAT_E_DCIN_UV_STAT			BIT(4)
+#define IRQSTAT_E_USBIN_OV_IRQ			BIT(3)
+#define IRQSTAT_E_USBIN_OV_STAT			BIT(2)
+#define IRQSTAT_E_USBIN_UV_IRQ			BIT(1)
+#define IRQSTAT_E_USBIN_UV_STAT			BIT(0)
 #define IRQSTAT_F				0x3a
+#define IRQSTAT_F_OTG_OVER_CURRENT_IRQ		BIT(7)
+#define IRQSTAT_F_OTG_OVER_CURRENT_STAT		BIT(6)
+#define IRQSTAT_F_OTG_BAT_UV_IRQ		BIT(5)
+#define IRQSTAT_F_OTG_BAT_UV_STAT		BIT(4)
+#define IRQSTAT_F_OTG_DETECT_IRQ		BIT(3)
+#define IRQSTAT_F_OTG_DETECT_STAT		BIT(2)
+#define IRQSTAT_F_POWER_OK_IRQ			BIT(1)
+#define IRQSTAT_F_POWER_OK_STAT			BIT(0)
 
 /* Status registers */
 #define STAT_A					0x3b
-#define STAT_A_FLOAT_VOLTAGE_MASK		0x3f
+#define STAT_A_FLOAT_VOLTAGE_MASK		0x3f	/* actual float voltage */
 #define STAT_B					0x3c
+#define STAT_B_USB_SUSPEND			BIT(7)
+/* 1 = fast charge current in bits 2:0, 0 = pre-charge current in bits 4:3 */
+#define STAT_B_FAST_CHARGE			BIT(5)
 #define STAT_C					0x3d
-#define STAT_C_CHG_ENABLED			BIT(0)
+#define STAT_C_CHARGER_ERROR_IRQ		BIT(7)
+#define STAT_C_CHARGER_ERROR			BIT(6)
+/* at least one charge cycle has terminated */
+#define STAT_C_CHG_TERM				BIT(5)
+#define STAT_C_BAT_BELOW_2V1			BIT(4)
 #define STAT_C_HOLDOFF_STAT			BIT(3)
+/* none, pre-charge, fast charge, taper charge */
 #define STAT_C_CHG_MASK				0x06
 #define STAT_C_CHG_SHIFT			1
-#define STAT_C_CHG_TERM				BIT(5)
-#define STAT_C_CHARGER_ERROR			BIT(6)
+#define STAT_C_CHG_ENABLED			BIT(0)
 #define STAT_D					0x3e
+#define STAT_D_RID_DONE				BIT(7)
+/* ACA: RID A, RID B, RID C, floating, not used */
+#define STAT_D_ACA_MASK				0x70
+#define STAT_D_APSD_DONE			BIT(3)
+/* APSD: not run, CDP, DCP, other charging port, SDP, ACA, TBD */
+#define STAT_D_APSD_RESULT_MASK			0x07
 #define STAT_E					0x3f
+#define STAT_E_USBIN_IN_USE			BIT(7)
+/* USB input mode in use: HC, USB1/1.5, USB5/9, n/a */
+#define STAT_E_USB_MODE_MASK			0x60
+#define STAT_E_USB_MODE_SHIFT			5
+#define STAT_E_AICL_DONE			BIT(4)
+/* AICL result, icl_tbl index */
+#define STAT_E_AICL_RESULT_MASK			0x0f
 
 #define SMB347_MAX_REGISTER			0x3f
 
@@ -168,6 +331,7 @@
  * @usb_online: is USB input connected
  * @irq_unsupported: is interrupt unsupported by SMB hardware
  * @usb_vbus_enabled: is USB VBUS powered by SMB charger
+ * @charge_current: fast charge current (in uA) programmed into the charger
  * @max_charge_current: maximum current (in uA) the battery can be charged
  * @max_charge_voltage: maximum voltage (in uV) the battery can be charged
  * @pre_charge_current: current (in uA) to use in pre-charging phase
@@ -200,6 +364,17 @@
  *		    (driver/pin controls)
  * @inok_polarity: polarity of INOK signal which denotes presence of external
  *		   power supply
+ * @use_apsd: enable automatic power source detection
+ * @use_aicl: enable automatic input current limit
+ * @set_recharge: program the automatic recharge
+ * @recharge_threshold: automatic recharge below float voltage (in uV)
+ * @set_charge_timeout: program the complete charge timeout
+ * @charge_timeout: complete charge timeout in minutes, %0 disables it
+ * @edev: extcon device reporting the attached cable
+ * @cable_notifier: notifier for @edev
+ * @config_lock: serializes the cable updates and the writes to the
+ *		 configuration registers, which need %CMD_A_ALLOW_WRITE
+ * @cable_mode: CMD_B mode applied for the current cable, -1 if none yet
  *
  * @use_main, @use_usb, and @use_usb_otg are means to enable/disable
  * hardware support for these. This is useful when we want to have for
@@ -249,10 +424,17 @@ struct smb347_charger {
 	bool			use_usb;
 	bool			use_usb_otg;
 	bool			use_apsd;
+	bool			use_aicl;
+	bool			set_recharge;
+	unsigned int		recharge_threshold;
+	bool			set_charge_timeout;
+	unsigned int		charge_timeout;
 	unsigned int		enable_control;
 	unsigned int		inok_polarity;
 	struct extcon_dev	*edev;
 	struct notifier_block	cable_notifier;
+	struct mutex		config_lock;
+	int			cable_mode;
 };
 
 enum smb_charger_chipid {
@@ -458,7 +640,7 @@ static int set_const_charge_current(struct smb347_charger *smb, int value)
 
 	ret = regmap_update_bits(smb->regmap, CFG_CHARGE_CURRENT,
 					CFG_CHARGE_CURRENT_FCC_MASK,
-					ret << CFG_CHARGE_CURRENT_FCC_SHIFT);
+					val << CFG_CHARGE_CURRENT_FCC_SHIFT);
 	if (ret < 0)
 		return ret;
 
@@ -754,12 +936,66 @@ static int smb347_set_writable(struct smb347_charger *smb, bool writable,
 	return ret;
 }
 
-static int smb347_hw_init(struct smb347_charger *smb)
+static int smb347_set_charge_control(struct smb347_charger *smb)
 {
 	unsigned int val;
 	int ret;
 
 	ret = smb347_set_writable(smb, true, false);
+	if (smb->use_aicl) {
+		ret = regmap_set_bits(smb->regmap, CFG_VARIOUS_FUNCTIONS,
+				      CFG_VARIOUS_FUNCTIONS_AICL);
+		if (ret < 0)
+			return ret;
+	}
+
+	if (smb->set_recharge) {
+		val = smb->recharge_threshold > 50000 ?
+			CFG_CHARGE_CONTROL_RECHARGE_100MV : 0;
+
+		ret = regmap_update_bits(smb->regmap, CFG_CHARGE_CONTROL,
+				CFG_CHARGE_CONTROL_AUTO_RECHARGE_DISABLED |
+				CFG_CHARGE_CONTROL_RECHARGE_100MV, val);
+		if (ret < 0)
+			return ret;
+	}
+
+	if (smb->set_charge_timeout) {
+		switch (smb->charge_timeout) {
+		case 0:
+			val = CFG_STAT_CC_TIMEOUT_DISABLED;
+			break;
+		case 382:
+			val = 0;
+			break;
+		case 764:
+			val = 1;
+			break;
+		case 1527:
+			val = 2;
+			break;
+		default:
+			dev_err(smb->dev, "unsupported charge timeout %u min\n",
+				smb->charge_timeout);
+			return -EINVAL;
+		}
+
+		ret = regmap_update_bits(smb->regmap, CFG_STAT,
+					 CFG_STAT_CC_TIMEOUT_MASK,
+					 val << CFG_STAT_CC_TIMEOUT_SHIFT);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int smb347_hw_init(struct smb347_charger *smb)
+{
+	unsigned int val, readback;
+	int ret;
+
+	ret = smb347_set_writable(smb, true);
 	if (ret < 0)
 		return ret;
 
@@ -778,6 +1014,10 @@ static int smb347_hw_init(struct smb347_charger *smb)
 	ret = smb347_set_apsd(smb);
 	if (ret < 0)
 		dev_info(smb->dev, "Could not enable APSD!");
+
+	ret = smb347_set_charge_control(smb);
+	if (ret < 0)
+		goto fail;
 
 	ret = smb347_set_voltage_limits(smb);
 	if (ret < 0)
@@ -840,6 +1080,22 @@ static int smb347_hw_init(struct smb347_charger *smb)
 	ret = regmap_update_bits(smb->regmap, CFG_PIN, CFG_PIN_EN_APSD_IRQ, 0);
 	if (ret < 0)
 		goto fail;
+
+	if (smb->edev && smb->enable_control == SMB3XX_CHG_ENABLE_SW) {
+		ret = regmap_clear_bits(smb->regmap, CFG_PIN,
+					CFG_PIN_USB_HC_PIN_CTRL |
+					CFG_PIN_USB_HC_DUAL_STATE);
+		if (ret < 0)
+			goto fail;
+	}
+
+	ret = regmap_read(smb->regmap, CFG_PIN, &readback);
+	if (ret < 0)
+		goto fail;
+
+	if ((readback & CFG_PIN_EN_CTRL_MASK) != val)
+		dev_warn(smb->dev, "configuration not accepted, CFG_PIN = %#x\n",
+			 readback);
 
 	ret = smb347_update_ps_status(smb);
 	if (ret < 0)
@@ -1158,10 +1414,18 @@ static int smb347_set_property_locked(struct power_supply *psy,
 				      const union power_supply_propval *val)
 {
 	struct smb347_charger *smb = power_supply_get_drvdata(psy);
+	int ret;
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
-		return set_const_charge_current(smb, val->intval);
+		/* smb347_hw_init() calls set_const_charge_current() writable */
+		ret = smb347_set_writable(smb, true);
+		if (ret < 0)
+			return ret;
+
+		ret = set_const_charge_current(smb, val->intval);
+		smb347_set_writable(smb, false);
+		return ret;
 	default:
 		return -EPERM;
 	}
@@ -1246,9 +1510,11 @@ static int smb347_set_property(struct power_supply *psy,
 	struct i2c_client *client = to_i2c_client(smb->dev);
 	int ret;
 
+	mutex_lock(&smb->config_lock);
 	disable_irq(client->irq);
 	ret = smb347_set_property_locked(psy, psp, val);
 	enable_irq(client->irq);
+	mutex_unlock(&smb->config_lock);
 
 	return ret;
 }
@@ -1358,9 +1624,6 @@ static void extcon_cable_worker(struct smb347_charger *smb)
 	struct extcon_dev *edev = smb->edev;
 	int ret, val;
 
-	smb347_charging_disable(smb);
-	smb347_set_writable(smb, true);
-
 	if (extcon_get_state(edev, EXTCON_CHG_USB_SDP)) {
 		dev_dbg(smb->dev, "enabling USB500 mode");
 		val = CMD_B_USB500_MODE;
@@ -1371,14 +1634,28 @@ static void extcon_cable_worker(struct smb347_charger *smb)
 		val = 0;
 	}
 
+	mutex_lock(&smb->config_lock);
+
+	if (val == smb->cable_mode)
+		goto out;
+
+	if (val) {
+		ret = smb347_hw_init(smb);
+		if (ret < 0)
+			dev_warn(smb->dev, "programming the charger failed: %d\n",
+				 ret);
+	}
+
+	smb347_charging_disable(smb);
+
 	ret = regmap_update_bits(smb->regmap, CMD_B,
 			CMD_B_USB500_MODE | CMD_B_HIGH_CURRENT_MODE, val);
 	if (ret < 0) {
 		dev_info(smb->dev, "setting USB mode failed");
-		return;
+		goto out;
 	}
+	smb->cable_mode = val;
 
-	smb347_set_writable(smb, false);
 	smb347_charging_enable(smb);
 
 	dev_dbg(smb->dev, "applying updated state to power supply");
@@ -1387,6 +1664,8 @@ static void extcon_cable_worker(struct smb347_charger *smb)
 		power_supply_changed(smb->mains);
 	if (smb->use_usb)
 		power_supply_changed(smb->usb);
+out:
+	mutex_unlock(&smb->config_lock);
 }
 
 static int extcon_cable_event(struct notifier_block *nb,
@@ -1402,7 +1681,6 @@ static int extcon_cable_event(struct notifier_block *nb,
 static int smb347_dt_parse_dev_info(struct smb347_charger *smb)
 {
 	struct device *dev = smb->dev;
-	int ret;
 
 	smb->soft_temp_limit_compensation =
 					SMB3XX_SOFT_TEMP_COMPENSATE_DEFAULT;
@@ -1448,19 +1726,19 @@ static int smb347_dt_parse_dev_info(struct smb347_charger *smb)
 				 &smb->inok_polarity);
 
 	smb->use_apsd = device_property_read_bool(dev, "summit,automatic-power-source-detection");
+	smb->use_aicl = device_property_read_bool(dev, "summit,enable-aicl");
+	smb->set_recharge = !device_property_read_u32(dev,
+				"summit,auto-recharge-threshold-microvolt",
+				&smb->recharge_threshold);
+	smb->set_charge_timeout = !device_property_read_u32(dev,
+				"summit,complete-charge-timeout-minutes",
+				&smb->charge_timeout);
 
 	smb->edev = extcon_get_edev_by_phandle(dev, 0);
 	if (IS_ERR(smb->edev)) {
 		if (PTR_ERR(smb->edev) != -EPROBE_DEFER)
 			dev_err(dev, "missing extcon connection\n");
 		return PTR_ERR(smb->edev);
-	}
-
-	if (smb->edev) {
-		smb->cable_notifier.notifier_call = extcon_cable_event;
-		ret = devm_extcon_register_notifier_all(dev, smb->edev, &smb->cable_notifier);
-		if (ret)
-			return ret;
 	}
 
 	return 0;
@@ -1734,6 +2012,8 @@ static int smb347_probe(struct i2c_client *client,
 		return -ENOMEM;
 	smb->dev = &client->dev;
 	smb->id = id->driver_data;
+	smb->cable_mode = -1;
+	mutex_init(&smb->config_lock);
 	i2c_set_clientdata(client, smb);
 
 	ret = smb347_dt_parse_dev_info(smb);
@@ -1787,8 +2067,15 @@ static int smb347_probe(struct i2c_client *client,
 		return PTR_ERR(smb->usb_rdev);
 	}
 
-	if (smb->edev)
+	if (smb->edev) {
+		smb->cable_notifier.notifier_call = extcon_cable_event;
+		ret = devm_extcon_register_notifier_all(dev, smb->edev,
+							&smb->cable_notifier);
+		if (ret)
+			return ret;
+
 		extcon_cable_worker(smb);
+	}
 
 	return 0;
 }
@@ -1798,7 +2085,9 @@ static void smb347_remove(struct i2c_client *client)
 	struct smb347_charger *smb = i2c_get_clientdata(client);
 
 	smb347_usb_vbus_regulator_disable(smb->usb_rdev);
+	mutex_lock(&smb->config_lock);
 	smb347_irq_disable(smb);
+	mutex_unlock(&smb->config_lock);
 }
 
 static void smb347_shutdown(struct i2c_client *client)
