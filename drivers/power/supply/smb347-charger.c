@@ -332,7 +332,6 @@
  * @irq_unsupported: is interrupt unsupported by SMB hardware
  * @usb_vbus_enabled: is USB VBUS powered by SMB charger
  * @charge_current: fast charge current (in uA) programmed into the charger
- * @max_charge_current: maximum current (in uA) the battery can be charged
  * @max_charge_voltage: maximum voltage (in uV) the battery can be charged
  * @pre_charge_current: current (in uA) to use in pre-charging phase
  * @termination_current: current (in uA) used to determine when the
@@ -405,7 +404,6 @@ struct smb347_charger {
 	bool			usb_vbus_enabled;
 
 	unsigned int		charge_current;
-	unsigned int		max_charge_current;
 	unsigned int		max_charge_voltage;
 	unsigned int		pre_charge_current;
 	unsigned int		termination_current;
@@ -941,7 +939,6 @@ static int smb347_set_charge_control(struct smb347_charger *smb)
 	unsigned int val;
 	int ret;
 
-	ret = smb347_set_writable(smb, true, false);
 	if (smb->use_aicl) {
 		ret = regmap_set_bits(smb->regmap, CFG_VARIOUS_FUNCTIONS,
 				      CFG_VARIOUS_FUNCTIONS_AICL);
@@ -995,7 +992,7 @@ static int smb347_hw_init(struct smb347_charger *smb)
 	unsigned int val, readback;
 	int ret;
 
-	ret = smb347_set_writable(smb, true);
+	ret = smb347_set_writable(smb, true, false);
 	if (ret < 0)
 		return ret;
 
@@ -1419,12 +1416,12 @@ static int smb347_set_property_locked(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
 		/* smb347_hw_init() calls set_const_charge_current() writable */
-		ret = smb347_set_writable(smb, true);
+		ret = smb347_set_writable(smb, true, false);
 		if (ret < 0)
 			return ret;
 
 		ret = set_const_charge_current(smb, val->intval);
-		smb347_set_writable(smb, false);
+		smb347_set_writable(smb, false, false);
 		return ret;
 	default:
 		return -EPERM;
@@ -1760,11 +1757,6 @@ static int smb347_get_battery_info(struct smb347_charger *smb)
 		return 0;
 	if (err)
 		return err;
-
-	if (info.constant_charge_current_max_ua != -EINVAL) {
-		smb->max_charge_current = info.constant_charge_current_max_ua;
-		smb->charge_current = smb->max_charge_current;
-	}
 
 	if (info->constant_charge_voltage_max_uv != -EINVAL)
 		smb->max_charge_voltage = info->constant_charge_voltage_max_uv;
