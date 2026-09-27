@@ -284,6 +284,7 @@ int dwc2_drd_init(struct dwc2_hsotg *hsotg)
 			dev_err(hsotg->dev,
 				"failed to register role switch: %d\n", ret);
 			return ret;
+		}
 
 		hsotg->role_sw = role_sw;
 	} else if (hsotg->edev) {
