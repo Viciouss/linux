@@ -242,6 +242,8 @@
 			maxim,rsns-microohm = <10000>;
 			maxim,over-heat-temp = <600>;
 			maxim,over-volt = <4300>;
+
+			power-supplies = <&power_supply>;
 		};
 	};
 
@@ -290,6 +292,9 @@
 			summit,fast-voltage-threshold-microvolt = <2600000>;
 			summit,chip-temperature-threshold-celsius = <130>;
 			summit,usb-current-limit-microamp = <1800000>;
+			summit,enable-aicl;
+			summit,auto-recharge-threshold-microvolt = <50000>;
+			summit,complete-charge-timeout-minutes = <1527>;
 
 			extcon = <&extcon_p4note>;
 

@@ -65,6 +65,34 @@ properties:
     description: Chip temperature for thermal regulation in °C.
     enum: [100, 110, 120, 130]
 
+  summit,enable-aicl:
+    type: boolean
+    description: |
+      Enable the automatic input current limit, which lowers the input
+      current when the input voltage drops below the AICL threshold.
+
+  summit,auto-recharge-threshold-microvolt:
+    description: |
+      Enable the automatic recharge, it starts a new charge cycle once the
+      battery voltage drops this far below the float voltage (in uV).
+    enum: [50000, 100000]
+
+  summit,complete-charge-timeout-minutes:
+    description: |
+      Complete charge safety timeout in minutes, 0 disables the timer.
+    enum: [0, 382, 764, 1527]
+
+  summit,automatic-power-source-detection:
+    type: boolean
+    description: Enable the automatic power source detection (APSD).
+
+  extcon:
+    description: |
+      phandle to the extcon device reporting the attached charger type.
+      The input mode (USB1, USB5 or high current) is then set through
+      command register B instead of the USB5/1/HC pins.
+    $ref: /schemas/types.yaml#/definitions/phandle
+
   summit,soft-compensation-method:
     description: Soft temperature limit compensation method
     $ref: /schemas/types.yaml#/definitions/uint32
