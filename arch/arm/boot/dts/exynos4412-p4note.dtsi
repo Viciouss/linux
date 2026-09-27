@@ -374,6 +374,49 @@
 		};
 	};
 
+	/* HDMI_EN, switches all SiI9234 supplies */
+	vcc_mhl: voltage-regulator-mhl {
+		compatible = "regulator-fixed";
+		regulator-name = "VCC_MHL";
+		gpio = <&gpl0 4 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	i2c-mhl {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpy2 2 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpy2 3 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <3>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		pinctrl-0 = <&i2c_mhl_bus>;
+		pinctrl-names = "default";
+
+		sii9234: hdmi-bridge@39 {
+			compatible = "sil,sii9234";
+			reg = <0x39>;
+			avcc33-supply = <&vcc_mhl>;
+			iovcc18-supply = <&vcc_mhl>;
+			avcc12-supply = <&vcc_mhl>;
+			cvcc12-supply = <&vcc_mhl>;
+			reset-gpios = <&gpf3 4 GPIO_ACTIVE_LOW>;
+			interrupt-parent = <&gpf3>;
+			interrupts = <5 IRQ_TYPE_LEVEL_HIGH>;
+			/* only the desk dock carries MHL, extcon_p4note tells */
+			extcon = <&extcon_p4note>;
+			/* p4note output swing from the vendor kernel */
+			sil,output-swing = /bits/ 8 <0xc0>;
+			/* the desk dock's SiI9290 skips RGND discovery */
+			sil,fixed-sii9290-sink;
+
+			port {
+				mhl_to_hdmi: endpoint {
+					remote-endpoint = <&hdmi_to_mhl>;
+				};
+			};
+		};
+	};
+
 	panel {
 		compatible = "samsung,ltl101al01";
 		pinctrl-0 = <&lvds_nshdn>;
@@ -666,6 +709,29 @@
 	status = "okay";
 };
 
+&hdmi {
+	hpd-gpios = <&gpx3 7 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&hdmi_hpd>;
+	pinctrl-names = "default";
+	vdd-supply = <&ldo8_reg>;
+	vdd_osc-supply = <&ldo10_reg>;
+	vdd_pll-supply = <&ldo8_reg>;
+	ddc = <&i2c_5>;
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			hdmi_to_mhl: endpoint {
+				remote-endpoint = <&mhl_to_hdmi>;
+			};
+		};
+	};
+};
+
 &hsotg {
 	vusb_d-supply = <&ldo15_reg>;
 	vusb_a-supply = <&ldo12_reg>;
@@ -829,6 +895,11 @@
 		wlf,ldo2ena-gpios = <&gpm4 4 GPIO_ACTIVE_HIGH>;
 		wlf,ldoena-always-driven;
 	};
+};
+
+/* HDMI DDC, passed through the SiI9234 */
+&i2c_5 {
+	status = "okay";
 };
 
 &i2c_6 {
@@ -1166,9 +1237,18 @@
 	};
 };
 
+/* HDMI PHY */
+&i2c_8 {
+	status = "okay";
+};
+
 &i2s0 {
 	pinctrl-0 = <&i2s0_bus>;
 	pinctrl-names = "default";
+	status = "okay";
+};
+
+&mixer {
 	status = "okay";
 };
 
@@ -1383,6 +1463,19 @@
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	i2c_mhl_bus: i2c-mhl-bus {
+		samsung,pins = "gpy2-2", "gpy2-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS4_PIN_DRV_LV1>;
+	};
+
+	/* floats while the SiI9234 is powered down */
+	hdmi_hpd: hdmi-hpd {
+		samsung,pins = "gpx3-7";
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
 	};
 
 	uart_sel: uart-sel {

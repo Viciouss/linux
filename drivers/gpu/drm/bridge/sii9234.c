@@ -19,6 +19,7 @@
 
 #include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/extcon.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
@@ -26,8 +27,10 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/of.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
 
 #define CBUS_DEVCAP_OFFSET		0x80
 
@@ -149,6 +152,7 @@
 #define T_SRC_RXSENSE_DEGLITCH		110
 
 #define MHL1_MAX_CLK			75000 /* in kHz */
+#define SII9234_DEFAULT_OUTPUT_SWING	0xEB
 
 #define I2C_TPI_ADDR			0x3D
 #define I2C_HDMI_ADDR			0x49
@@ -172,6 +176,13 @@ struct sii9234 {
 	struct gpio_desc *gpio_reset;
 	int i2c_error;
 	struct regulator_bulk_data supplies[4];
+	u8 output_swing;
+	bool fixed_sink;
+
+	/* optional: power the chip only while the MHL cable is reported */
+	struct extcon_dev *extcon;
+	struct notifier_block extcon_nb;
+	struct work_struct extcon_work;
 
 	struct mutex lock; /* Protects fields below and device registers */
 	enum sii9234_state state;
@@ -443,7 +454,7 @@ static int sii9234_mhl_tx_ctl_int(struct sii9234 *ctx)
 {
 	mhl_tx_writeb(ctx, MHL_TX_MHLTX_CTL1_REG, 0xD0);
 	mhl_tx_writeb(ctx, MHL_TX_MHLTX_CTL2_REG, 0xFC);
-	mhl_tx_writeb(ctx, MHL_TX_MHLTX_CTL4_REG, 0xEB);
+	mhl_tx_writeb(ctx, MHL_TX_MHLTX_CTL4_REG, ctx->output_swing);
 	mhl_tx_writeb(ctx, MHL_TX_MHLTX_CTL7_REG, 0x0C);
 
 	return sii9234_clear_error(ctx);
@@ -566,6 +577,155 @@ static int sii9234_goto_d3(struct sii9234 *ctx)
 	return -1;
 }
 
+/*
+ * Fixed SiI9290 sink, e.g. the desk dock of the Samsung Galaxy Note 10.1
+ * (p4note), which carries MHL over its 30-pin connector. The dock does not
+ * go through the RGND discovery the D3 path waits for: it raises RSEN
+ * without an RGND interrupt. Bring the link up directly instead, with the
+ * sequence of the Samsung vendor driver (CONFIG_SAMSUNG_MHL_9290). The chip
+ * then passes HPD and DDC on by itself, the interrupt stays unused.
+ */
+static int sii9234_fixed_sink_cbus_init(struct sii9234 *ctx)
+{
+	cbus_writeb(ctx, 0x1F, 0x02);
+	cbus_writeb(ctx, 0x07, 0x30 | 0x06);
+	cbus_writeb(ctx, 0x40, 0x03);
+	cbus_writeb(ctx, 0x42, 0x06);
+	cbus_writeb(ctx, 0x36, 0x0C);
+	cbus_writeb(ctx, 0x3D, 0xFD);
+	cbus_writeb(ctx, 0x1C, 0x00);
+	cbus_writeb(ctx, 0x44, 0x00);
+
+	return sii9234_clear_error(ctx);
+}
+
+static int sii9234_fixed_sink_reg_init(struct sii9234 *ctx)
+{
+	int ret;
+
+	tpi_writeb(ctx, TPI_DPD_REG, 0x3F);
+	hdmi_writeb(ctx, HDMI_RX_TMDS_CLK_EN_REG, 0x01);
+	hdmi_writeb(ctx, HDMI_RX_TMDS_CH_EN_REG, 0x15);
+	mhl_tx_writeb(ctx, 0x08, 0x35);
+	hdmi_writeb(ctx, 0x00, 0x00);
+	hdmi_writeb(ctx, 0x13, 0x60);
+	hdmi_writeb(ctx, 0x14, 0xF0);
+	hdmi_writeb(ctx, 0x4B, 0x06);
+
+	/* Analog PLL control */
+	hdmi_writeb(ctx, 0x17, 0x07);
+	hdmi_writeb(ctx, 0x1A, 0x20);
+	hdmi_writeb(ctx, 0x22, 0xE0);
+	hdmi_writeb(ctx, 0x23, 0xC0);
+	hdmi_writeb(ctx, 0x24, 0xA0);
+	hdmi_writeb(ctx, 0x25, 0x80);
+	hdmi_writeb(ctx, 0x26, 0x60);
+	hdmi_writeb(ctx, 0x27, 0x40);
+	hdmi_writeb(ctx, 0x28, 0x20);
+	hdmi_writeb(ctx, 0x29, 0x00);
+
+	hdmi_writeb(ctx, 0x4D, 0x02);
+	hdmi_writeb(ctx, 0x4C, 0xA0);
+	mhl_tx_writeb(ctx, MHL_TX_TMDS_CCTRL, 0x34);
+	hdmi_writeb(ctx, 0x31, 0x0B);
+	hdmi_writeb(ctx, 0x45, 0x06);
+
+	mhl_tx_writeb(ctx, MHL_TX_MHLTX_CTL1_REG, 0xD0);
+	mhl_tx_writeb(ctx, MHL_TX_MHLTX_CTL2_REG, 0xFC);
+	mhl_tx_writeb(ctx, MHL_TX_MHLTX_CTL4_REG, ctx->output_swing);
+	mhl_tx_writeb(ctx, 0xA6, 0x00);
+	/* Enable HDCP Compliance safety */
+	mhl_tx_writeb(ctx, 0x2B, 0x01);
+
+	/* CBUS and discovery */
+	mhl_tx_writebm(ctx, MHL_TX_DISC_CTRL1_REG, BIT(3), BIT(3) | BIT(2));
+	mhl_tx_writeb(ctx, MHL_TX_DISC_CTRL2_REG, 0xE5);
+	mhl_tx_writeb(ctx, MHL_TX_DISC_CTRL5_REG, 0x66);
+	cbus_writebm(ctx, 0x31, ~0, 0x0C);
+	mhl_tx_writeb(ctx, 0xA5, 0x80);
+	mhl_tx_writeb(ctx, MHL_TX_DISC_CTRL6_REG, 0x31);
+	mhl_tx_writeb(ctx, MHL_TX_DISC_CTRL7_REG, 0x22);
+	mhl_tx_writebm(ctx, MHL_TX_DISC_CTRL6_REG, ~0, USB_ID_OVR);
+	mhl_tx_writeb(ctx, MHL_TX_DISC_CTRL3_REG, 0x46);
+	mhl_tx_writeb(ctx, MHL_TX_DISC_CTRL4_REG, 0xDC);
+	mhl_tx_writebm(ctx, MHL_TX_INT_CTRL_REG, 0, BIT(2) | BIT(1));
+
+	ret = sii9234_clear_error(ctx);
+	if (ret < 0)
+		return ret;
+
+	msleep(25);
+
+	mhl_tx_writebm(ctx, MHL_TX_DISC_CTRL6_REG, 0, USB_ID_OVR);
+	mhl_tx_writeb(ctx, MHL_TX_DISC_CTRL1_REG, 0x27);
+
+	ret = sii9234_fixed_sink_cbus_init(ctx);
+	if (ret < 0)
+		return ret;
+
+	/* Enable Auto soft reset on SCDT = 0 */
+	mhl_tx_writeb(ctx, 0x05, 0x04);
+	/* HDMI Transcode mode enable */
+	mhl_tx_writeb(ctx, 0x0D, 0x1C);
+
+	return sii9234_clear_error(ctx);
+}
+
+/* page 0 registers without a direct address, written through 0xBC-0xBE */
+static void sii9234_page0_writeb(struct sii9234 *ctx, int offset, int value)
+{
+	mhl_tx_writeb(ctx, 0xBC, 0x01);
+	mhl_tx_writeb(ctx, 0xBD, offset);
+	mhl_tx_writeb(ctx, 0xBE, value);
+}
+
+static int sii9234_fixed_sink_init(struct sii9234 *ctx)
+{
+	int value, ret;
+
+	sii9234_clear_error(ctx);
+
+	ret = sii9234_fixed_sink_reg_init(ctx);
+	if (ret < 0)
+		return ret;
+
+	/* Start TPI */
+	mhl_tx_writeb(ctx, 0xC7, 0x00);
+
+	sii9234_page0_writeb(ctx, 0x78, 0x01);
+	/* MHD RX connected */
+	sii9234_page0_writeb(ctx, 0xA0, 0x10);
+	cbus_writeb(ctx, 0x07, 0x30 | 0x0E);
+	cbus_writeb(ctx, 0x47, 0x03);
+	cbus_writeb(ctx, 0x21, 0x01);
+
+	/* Enable MHD TX */
+	mhl_tx_writebm(ctx, 0x1A, 0, BIT(4));
+	/* MHD power active mode */
+	mhl_tx_writebm(ctx, 0x1E, 0, BIT(1) | BIT(0));
+
+	mhl_tx_writeb(ctx, 0xBC, 0x01);
+	mhl_tx_writeb(ctx, 0xBD, 0xA0);
+	value = mhl_tx_readb(ctx, 0xBE);
+	ret = sii9234_clear_error(ctx);
+	if (ret < 0)
+		return ret;
+
+	if (value & (BIT(7) | BIT(6))) {
+		/* Reset the Mobile HD FIFO */
+		sii9234_page0_writeb(ctx, 0x05, BIT(4) | 0x04);
+		usleep_range(1000, 2000);
+		sii9234_page0_writeb(ctx, 0x05, 0x04);
+	}
+
+	ret = sii9234_clear_error(ctx);
+	if (ret < 0)
+		return ret;
+
+	ctx->state = ST_MHL_ESTABLISHED;
+	return 0;
+}
+
 static int sii9234_hw_on(struct sii9234 *ctx)
 {
 	return regulator_bulk_enable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
@@ -597,6 +757,18 @@ static void sii9234_cable_in(struct sii9234 *ctx)
 		goto unlock;
 
 	sii9234_hw_reset(ctx);
+
+	if (ctx->fixed_sink) {
+		ret = sii9234_fixed_sink_init(ctx);
+		if (ret < 0) {
+			dev_err(ctx->dev, "failed to bring up the MHL link: %d\n",
+				ret);
+			sii9234_hw_off(ctx);
+			ctx->state = ST_OFF;
+		}
+		goto unlock;
+	}
+
 	sii9234_goto_d3(ctx);
 	/* To avoid irq storm, when hw is in meta state */
 	enable_irq(to_i2c_client(ctx->dev)->irq);
@@ -612,8 +784,14 @@ static void sii9234_cable_out(struct sii9234 *ctx)
 	if (ctx->state == ST_OFF)
 		goto unlock;
 
-	disable_irq(to_i2c_client(ctx->dev)->irq);
+	if (!ctx->fixed_sink)
+		disable_irq(to_i2c_client(ctx->dev)->irq);
 	tpi_writeb(ctx, TPI_DPD_REG, 0);
+	/*
+	 * The chip may already be unreachable here, don't let the error block
+	 * the register accesses of the next cable_in.
+	 */
+	sii9234_clear_error(ctx);
 	/* Turn on&off hpd festure for only QCT HDMI */
 	sii9234_hw_off(ctx);
 
@@ -813,6 +991,48 @@ static irqreturn_t sii9234_irq_thread(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static void sii9234_extcon_work(struct work_struct *work)
+{
+	struct sii9234 *ctx = container_of(work, struct sii9234, extcon_work);
+
+	if (extcon_get_state(ctx->extcon, EXTCON_DISP_MHL) > 0)
+		sii9234_cable_in(ctx);
+	else
+		sii9234_cable_out(ctx);
+}
+
+static int sii9234_extcon_notifier(struct notifier_block *nb,
+				   unsigned long event, void *ptr)
+{
+	struct sii9234 *ctx = container_of(nb, struct sii9234, extcon_nb);
+
+	schedule_work(&ctx->extcon_work);
+	return NOTIFY_DONE;
+}
+
+static int sii9234_init_extcon(struct sii9234 *ctx)
+{
+	int ret;
+
+	if (!of_property_read_bool(ctx->dev->of_node, "extcon"))
+		return 0;
+
+	ctx->extcon = extcon_get_edev_by_phandle(ctx->dev, 0);
+	if (IS_ERR(ctx->extcon))
+		return dev_err_probe(ctx->dev, PTR_ERR(ctx->extcon),
+				     "failed to get extcon\n");
+
+	INIT_WORK(&ctx->extcon_work, sii9234_extcon_work);
+	ctx->extcon_nb.notifier_call = sii9234_extcon_notifier;
+	ret = extcon_register_notifier(ctx->extcon, EXTCON_DISP_MHL,
+				       &ctx->extcon_nb);
+	if (ret)
+		dev_err(ctx->dev, "failed to register extcon notifier: %d\n",
+			ret);
+
+	return ret;
+}
+
 static int sii9234_init_resources(struct sii9234 *ctx,
 				  struct i2c_client *client)
 {
@@ -840,6 +1060,12 @@ static int sii9234_init_resources(struct sii9234 *ctx,
 			dev_err(ctx->dev, "regulator_bulk failed\n");
 		return ret;
 	}
+
+	ctx->output_swing = SII9234_DEFAULT_OUTPUT_SWING;
+	of_property_read_u8(ctx->dev->of_node, "sil,output-swing",
+			    &ctx->output_swing);
+	ctx->fixed_sink = of_property_read_bool(ctx->dev->of_node,
+						"sil,fixed-sii9290-sink");
 
 	ctx->client[I2C_MHL] = client;
 
@@ -927,11 +1153,19 @@ static int sii9234_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, ctx);
 
+	ret = sii9234_init_extcon(ctx);
+	if (ret < 0)
+		return ret;
+
 	ctx->bridge.funcs = &sii9234_bridge_funcs;
 	ctx->bridge.of_node = dev->of_node;
 	drm_bridge_add(&ctx->bridge);
 
-	sii9234_cable_in(ctx);
+	if (ctx->extcon)
+		/* pick up a cable that was reported before we were probed */
+		schedule_work(&ctx->extcon_work);
+	else
+		sii9234_cable_in(ctx);
 
 	return 0;
 }
@@ -940,11 +1174,43 @@ static int sii9234_remove(struct i2c_client *client)
 {
 	struct sii9234 *ctx = i2c_get_clientdata(client);
 
+	if (ctx->extcon) {
+		extcon_unregister_notifier(ctx->extcon, EXTCON_DISP_MHL,
+					   &ctx->extcon_nb);
+		cancel_work_sync(&ctx->extcon_work);
+	}
+
 	sii9234_cable_out(ctx);
 	drm_bridge_remove(&ctx->bridge);
 
 	return 0;
 }
+
+static int __maybe_unused sii9234_suspend(struct device *dev)
+{
+	struct sii9234 *ctx = dev_get_drvdata(dev);
+
+	/* without extcon the chip has to stay powered to detect a cable */
+	if (!ctx->extcon)
+		return 0;
+
+	cancel_work_sync(&ctx->extcon_work);
+	sii9234_cable_out(ctx);
+
+	return 0;
+}
+
+static int __maybe_unused sii9234_resume(struct device *dev)
+{
+	struct sii9234 *ctx = dev_get_drvdata(dev);
+
+	if (ctx->extcon)
+		schedule_work(&ctx->extcon_work);
+
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(sii9234_pm_ops, sii9234_suspend, sii9234_resume);
 
 static const struct of_device_id sii9234_dt_match[] = {
 	{ .compatible = "sil,sii9234" },
@@ -962,6 +1228,7 @@ static struct i2c_driver sii9234_driver = {
 	.driver = {
 		.name	= "sii9234",
 		.of_match_table = sii9234_dt_match,
+		.pm = &sii9234_pm_ops,
 	},
 	.probe = sii9234_probe,
 	.remove = sii9234_remove,

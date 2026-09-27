@@ -86,13 +86,18 @@
  * To charger: EXTCON_CHG_USB_DCP
  * Accessory: EXTCON_USB_HOST
  * Dock: EXTCON_DOCK
- * hdmi: EXTCON_DISP_MHL (how to determine?)
+ * hdmi: EXTCON_DISP_MHL
  *
- * TODOs
- * ------
+ * Dock detection
+ * --------------
  *
- * - figure out hdmi detection
- * -
+ * The 30-pin dock line is shared by the keyboard dock and the desk dock, which
+ * carries MHL. On attach the accessory 5V and the UART are switched to the
+ * dock and EXTCON_DOCK is set, so the keyboard dock driver can do its
+ * handshake. It reports the result through p4note_extcon_keyboard_feedback().
+ * Without a keyboard the dock is taken for the desk dock: EXTCON_DISP_MHL is
+ * set for the MHL bridge and, like the vendor kernel, the 5V and the UART are
+ * switched off again 500ms later, the desk dock needs neither.
  *
  * based on px-switch.c from p4note vendor sources, copyright Samsung 2012
  *
@@ -110,7 +115,10 @@
 #include <linux/gpio/consumer.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
+#include <linux/extcon/extcon-p4note.h>
 #include <linux/delay.h>
+
+#include "extcon.h"
 
 static const unsigned int p4note_extcon_cable[] = {
 	EXTCON_USB,
@@ -134,6 +142,13 @@ enum gpio_state {
 	GPIO_ON
 };
 
+enum p4note_dock_type {
+	DOCK_NONE,
+	DOCK_PROBING,
+	DOCK_KEYBOARD,
+	DOCK_MHL,
+};
+
 enum usb_path {
 	USB_PATH_NONE = 1 << 0,
 	USB_PATH_ADCCHECK = 1 << 1,
@@ -155,7 +170,11 @@ struct p4note_extcon_data {
 	struct p4note_gpio accessory;
 	struct p4note_gpio dock;
 	struct p4note_gpio charger;
-	bool dock_is_hdmi;
+
+	/* protects dock_type and the dock line's last_state */
+	struct mutex dock_mutex;
+	enum p4note_dock_type dock_type;
+	struct delayed_work dock_release_work;
 
 	struct gpio_desc *accessory_enable;
 	struct gpio_desc *accessory_5v;
@@ -188,6 +207,9 @@ struct p4note_extcon_data {
  * connections as well as connections to the dock
  *
  * adc channel: 6
+ *
+ * The limits are raw 12 bit counts, like ADC_TA_TH_L/ADC_TA_TH_H in the
+ * vendor sec_battery_px.c, so the channel has to be read raw, not processed.
  */
 static struct p4note_adc_cond charger_adc_conditions[] = {
 	{
@@ -196,7 +218,7 @@ static struct p4note_adc_cond charger_adc_conditions[] = {
 		.max_adc = 1800
 	},
 	{
-		.type = { EXTCON_USB, EXTCON_CHG_USB_SDP },
+		.type = { EXTCON_USB, EXTCON_CHG_USB_DCP },
 		.min_adc = 0,
 		.max_adc = 4096
 	},
@@ -251,6 +273,8 @@ static struct p4note_adc_cond acc_adc_conditions[] = {
 	},
 	{}
 };
+
+#define DOCK_RELEASE_MS 500
 
 #define log_connceted_state(data) dev_dbg(data->dev, "accessory(%d) + dock(%d) + charger(%d)\n", \
 		data->accessory.last_state, \
@@ -489,25 +513,70 @@ static irqreturn_t handle_accessory_irq(int irq, void *arg)
 	return IRQ_HANDLED;
 }
 
+/* power the dock up for the keyboard handshake, called with dock_mutex held */
+static void dock_connect(struct p4note_extcon_data *data)
+{
+	mutex_lock(&data->usb_mutex);
+	accessory_power(data, 0, false);
+	check_uart_path(data, true);
+	msleep(200);
+	accessory_power(data, 1, true);
+	mutex_unlock(&data->usb_mutex);
+
+	data->dock_type = DOCK_PROBING;
+	extcon_set_state_sync(data->edev, EXTCON_DOCK, true);
+}
+
+/* called with dock_mutex held */
+static void dock_disconnect(struct p4note_extcon_data *data)
+{
+	if (data->dock_type == DOCK_MHL)
+		extcon_set_state_sync(data->edev, EXTCON_DISP_MHL, false);
+	data->dock_type = DOCK_NONE;
+
+	mutex_lock(&data->usb_mutex);
+	accessory_power(data, 1, false);
+	check_uart_path(data, false);
+	mutex_unlock(&data->usb_mutex);
+
+	extcon_set_state_sync(data->edev, EXTCON_DOCK, false);
+}
+
+static void dock_release_worker(struct work_struct *work)
+{
+	struct p4note_extcon_data *data = container_of(to_delayed_work(work),
+			struct p4note_extcon_data, dock_release_work);
+
+	mutex_lock(&data->dock_mutex);
+	if (data->dock_type == DOCK_MHL) {
+		dev_dbg(data->dev, "releasing dock power\n");
+		mutex_lock(&data->usb_mutex);
+		accessory_power(data, 1, false);
+		check_uart_path(data, false);
+		mutex_unlock(&data->usb_mutex);
+	}
+	mutex_unlock(&data->dock_mutex);
+}
+
 static void update_dock(struct p4note_extcon_data *data)
 {
 	if (gpiod_get_value(data->dock.desc)) {
 		if (data->dock.last_state == GPIO_OFF) {
 			dev_dbg(data->dev, "connecting dock...\n");
+			mutex_lock(&data->dock_mutex);
 			data->dock.last_state = GPIO_ON;
-			accessory_power(data, 0, false);
-			check_uart_path(data, true);
-			msleep(200);
-			accessory_power(data, 1, true);
-			extcon_set_state_sync(data->edev, EXTCON_DOCK, true);
+			dock_connect(data);
+			mutex_unlock(&data->dock_mutex);
 		}
 	} else {
 		if (data->dock.last_state == GPIO_ON) {
 			dev_dbg(data->dev, "disconnecting dock...\n");
+			/* the worker takes dock_mutex, cancel it before that */
+			cancel_delayed_work_sync(&data->dock_release_work);
+			mutex_lock(&data->dock_mutex);
 			data->dock.last_state = GPIO_OFF;
-			accessory_power(data, 1, false);
-			check_uart_path(data, false);
-			extcon_set_state_sync(data->edev, EXTCON_DOCK, false);
+			dock_disconnect(data);
+			mutex_unlock(&data->dock_mutex);
 		}
 	}
 
@@ -652,13 +721,14 @@ static void read_charger_adc_worker(struct work_struct *work)
 
 	usleep_range(30000, 40000);
 
-	err = iio_read_channel_processed(data->charger_iio_chan, &adc_val);
-	if (!err)
-		err = iio_read_channel_processed(data->charger_iio_chan, &adc_val_2);
+	/* iio_read_channel_raw() returns IIO_VAL_INT on success, not 0 */
+	err = iio_read_channel_raw(data->charger_iio_chan, &adc_val);
+	if (err >= 0)
+		err = iio_read_channel_raw(data->charger_iio_chan, &adc_val_2);
 	usb_switch_clr_path(data, USB_PATH_ADCCHECK);
 	mutex_unlock(&data->usb_mutex);
 
-	if (err) {
+	if (err < 0) {
 		dev_info(data->dev, "error reading the adc value for the charger: %d\n", err);
 		return;
 	}
@@ -710,6 +780,10 @@ static int p4note_extcon_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	data->dev = dev;
+	/* the IRQ handlers below can run before the rest of probe */
+	mutex_init(&data->usb_mutex);
+	mutex_init(&data->dock_mutex);
+	INIT_DELAYED_WORK(&data->dock_release_work, dock_release_worker);
 
 	// accessory interrupt
 	data->accessory.desc = devm_gpiod_get(dev, "acc", GPIOD_IN);
@@ -820,8 +894,6 @@ static int p4note_extcon_probe(struct platform_device *pdev)
 	}
 
 	data->current_path = USB_PATH_NONE;
-
-	mutex_init(&data->usb_mutex);
 
 	if (!gpiod_get_value(data->usb_sel_0) && gpiod_get_value(data->usb_sel_1)) {
 		mutex_lock(&data->usb_mutex);
@@ -941,6 +1013,96 @@ static struct platform_driver p4note_extcon_driver = {
 };
 
 module_platform_driver(p4note_extcon_driver);
+
+static struct p4note_extcon_data *p4note_extcon_from_edev(struct extcon_dev *edev)
+{
+	struct device *dev = edev->dev.parent;
+
+	if (!dev || dev->driver != &p4note_extcon_driver.driver)
+		return NULL;
+
+	return dev_get_drvdata(dev);
+}
+
+/**
+ * p4note_extcon_keyboard_feedback() - result of the keyboard dock handshake
+ * @edev: the extcon device of this driver, as used by the keyboard dock driver
+ * @connected: whether a keyboard answered
+ *
+ * Without a keyboard the dock is taken for the desk dock: EXTCON_DISP_MHL is
+ * set and the dock power is released after DOCK_RELEASE_MS. Only the first
+ * negative result after an attach counts, a keyboard still wins until the
+ * power is gone.
+ *
+ * Return: 0 on success, -EINVAL if @edev does not belong to this driver.
+ */
+int p4note_extcon_keyboard_feedback(struct extcon_dev *edev, bool connected)
+{
+	struct p4note_extcon_data *data = p4note_extcon_from_edev(edev);
+
+	if (!data)
+		return -EINVAL;
+
+	mutex_lock(&data->dock_mutex);
+
+	if (data->dock.last_state != GPIO_ON || data->dock_type == DOCK_NONE)
+		goto unlock;
+
+	if (connected) {
+		if (data->dock_type == DOCK_KEYBOARD)
+			goto unlock;
+
+		/* a running worker blocks on dock_mutex and then does nothing */
+		cancel_delayed_work(&data->dock_release_work);
+		if (data->dock_type == DOCK_MHL)
+			extcon_set_state_sync(data->edev, EXTCON_DISP_MHL, false);
+		data->dock_type = DOCK_KEYBOARD;
+		dev_info(data->dev, "keyboard dock\n");
+	} else if (data->dock_type == DOCK_PROBING) {
+		data->dock_type = DOCK_MHL;
+		dev_info(data->dev, "no keyboard, switching the dock to MHL\n");
+		extcon_set_state_sync(data->edev, EXTCON_DISP_MHL, true);
+		schedule_delayed_work(&data->dock_release_work,
+				      msecs_to_jiffies(DOCK_RELEASE_MS));
+	}
+
+unlock:
+	mutex_unlock(&data->dock_mutex);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(p4note_extcon_keyboard_feedback);
+
+/**
+ * p4note_extcon_keyboard_ready() - the keyboard dock driver listens now
+ * @edev: the extcon device of this driver, as used by the keyboard dock driver
+ *
+ * A dock attached before the keyboard dock driver was ready (e.g. at boot)
+ * sent its handshake to nobody. Power it up again for a new handshake,
+ * unless it is already known to be a keyboard.
+ *
+ * Return: 0 on success, -EINVAL if @edev does not belong to this driver.
+ */
+int p4note_extcon_keyboard_ready(struct extcon_dev *edev)
+{
+	struct p4note_extcon_data *data = p4note_extcon_from_edev(edev);
+
+	if (!data)
+		return -EINVAL;
+
+	cancel_delayed_work_sync(&data->dock_release_work);
+
+	mutex_lock(&data->dock_mutex);
+	if (data->dock.last_state == GPIO_ON &&
+	    data->dock_type != DOCK_KEYBOARD) {
+		dev_dbg(data->dev, "restarting dock detection\n");
+		dock_disconnect(data);
+		dock_connect(data);
+	}
+	mutex_unlock(&data->dock_mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(p4note_extcon_keyboard_ready);
 
 MODULE_DESCRIPTION("Samsung P4Note external connector");
 MODULE_LICENSE("GPL");

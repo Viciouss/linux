@@ -7,21 +7,20 @@
  * The keyboard dock talks to the tablet over UART2 through the 30-pin
  * connector, 9600 8N1. The dock connector driver (extcon-p4note) detects the
  * dock, power cycles the accessory 5V rail and routes the UART to the dock,
- * then reports EXTCON_DOCK.
+ * then reports EXTCON_DOCK. This driver reports the handshake result back.
  *
  * Right after power-up the keyboard sends its layout byte (0xeb US, 0xec UK).
  * Scancodes are USB HID usage ids, bit 7 set for a release, 0x00 releases all
  * keys. The tablet can send 0xca/0xcb (caps lock LED on/off) and 0x10 (idle).
  *
- * The vendor kernel treats a dock that does not answer within 700ms as the
- * desk dock, whose 30-pin connector carries MHL. This driver does the same
- * and reports that as EXTCON_DISP_MHL for the MHL bridge.
+ * Like the vendor kernel, a dock that does not answer within 700ms is not a
+ * keyboard. extcon-p4note then switches the dock over to the desk dock (MHL).
  */
 
 #include <linux/bitmap.h>
 #include <linux/completion.h>
 #include <linux/extcon.h>
-#include <linux/extcon-provider.h>
+#include <linux/extcon/extcon-p4note.h>
 #include <linux/input.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -166,20 +165,15 @@ static const unsigned short p4note_kbd_keycodes[KBD_NUM_KEYS] = {
 	[0x7f] = KEY_F17,
 };
 
-static const unsigned int p4note_kbd_extcon_cables[] = {
-	EXTCON_DISP_MHL,
-	EXTCON_NONE,
-};
-
 struct p4note_kbd {
 	struct device *dev;
 	struct serdev_device *serdev;
 
 	struct extcon_dev *dock_edev;
 	struct notifier_block dock_nb;
-	struct extcon_dev *edev;
 
 	struct work_struct dock_work;
+	struct work_struct feedback_work;
 	struct work_struct led_work;
 	struct delayed_work remap_work;
 	struct completion layout_rcvd;
@@ -188,7 +182,6 @@ struct p4note_kbd {
 	struct mutex lock;
 	struct input_dev *input;
 	bool docked;
-	bool mhl;
 	enum kbd_layout layout;
 	u8 remap_scan;
 	unsigned short keycode[KBD_NUM_KEYS];
@@ -215,15 +208,6 @@ static void p4note_kbd_release_all(struct p4note_kbd *kbd)
 		input_report_key(kbd->input, kbd->keycode[i], 0);
 	input_sync(kbd->input);
 	bitmap_zero(kbd->pressed, KBD_NUM_KEYS);
-}
-
-static void p4note_kbd_set_mhl(struct p4note_kbd *kbd, bool mhl)
-{
-	if (kbd->mhl == mhl)
-		return;
-
-	kbd->mhl = mhl;
-	extcon_set_state_sync(kbd->edev, EXTCON_DISP_MHL, mhl);
 }
 
 static int p4note_kbd_input_event(struct input_dev *input, unsigned int type,
@@ -303,7 +287,8 @@ static int p4note_kbd_connect(struct p4note_kbd *kbd)
 	}
 
 	kbd->input = input;
-	p4note_kbd_set_mhl(kbd, false);
+	/* the feedback can sleep, and we may be in receive_buf */
+	schedule_work(&kbd->feedback_work);
 
 	dev_info(kbd->dev, "%s keyboard dock connected\n",
 		 kbd->layout == LAYOUT_UK ? "UK" : "US");
@@ -479,12 +464,21 @@ static const struct serdev_device_ops p4note_kbd_serdev_ops = {
 	.write_wakeup = serdev_device_write_wakeup,
 };
 
+static void p4note_kbd_feedback_work(struct work_struct *work)
+{
+	struct p4note_kbd *kbd = container_of(work, struct p4note_kbd,
+					      feedback_work);
+
+	p4note_extcon_keyboard_feedback(kbd->dock_edev, true);
+}
+
 static void p4note_kbd_dock_work(struct work_struct *work)
 {
 	struct p4note_kbd *kbd = container_of(work, struct p4note_kbd,
 					      dock_work);
 	bool docked = extcon_get_state(kbd->dock_edev, EXTCON_DOCK) > 0;
 	unsigned long timeout = msecs_to_jiffies(KBD_HANDSHAKE_MS);
+	bool no_keyboard = false;
 
 	mutex_lock(&kbd->lock);
 
@@ -496,7 +490,6 @@ static void p4note_kbd_dock_work(struct work_struct *work)
 
 	if (!docked) {
 		p4note_kbd_disconnect(kbd);
-		p4note_kbd_set_mhl(kbd, false);
 		kbd->layout = LAYOUT_UNKNOWN;
 		reinit_completion(&kbd->layout_rcvd);
 		mutex_unlock(&kbd->lock);
@@ -518,11 +511,15 @@ static void p4note_kbd_dock_work(struct work_struct *work)
 					"failed to register input device: %d\n",
 					ret);
 		} else {
-			dev_info(kbd->dev, "no keyboard handshake, assuming desk dock\n");
-			p4note_kbd_set_mhl(kbd, true);
+			dev_info(kbd->dev, "no keyboard handshake\n");
+			no_keyboard = true;
 		}
 	}
 	mutex_unlock(&kbd->lock);
+
+	/* the feedback takes the locks of extcon-p4note, drop ours first */
+	if (no_keyboard)
+		p4note_extcon_keyboard_feedback(kbd->dock_edev, false);
 }
 
 static int p4note_kbd_dock_notifier(struct notifier_block *nb,
@@ -549,6 +546,7 @@ static int p4note_kbd_probe(struct serdev_device *serdev)
 	mutex_init(&kbd->lock);
 	init_completion(&kbd->layout_rcvd);
 	INIT_WORK(&kbd->dock_work, p4note_kbd_dock_work);
+	INIT_WORK(&kbd->feedback_work, p4note_kbd_feedback_work);
 	INIT_WORK(&kbd->led_work, p4note_kbd_led_work);
 	INIT_DELAYED_WORK(&kbd->remap_work, p4note_kbd_remap_work);
 
@@ -556,14 +554,6 @@ static int p4note_kbd_probe(struct serdev_device *serdev)
 	if (IS_ERR(kbd->dock_edev))
 		return dev_err_probe(dev, PTR_ERR(kbd->dock_edev),
 				     "failed to get dock extcon\n");
-
-	kbd->edev = devm_extcon_dev_allocate(dev, p4note_kbd_extcon_cables);
-	if (IS_ERR(kbd->edev))
-		return PTR_ERR(kbd->edev);
-
-	ret = devm_extcon_dev_register(dev, kbd->edev);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to register extcon\n");
 
 	serdev_device_set_drvdata(serdev, kbd);
 	serdev_device_set_client_ops(serdev, &p4note_kbd_serdev_ops);
@@ -588,11 +578,24 @@ static int p4note_kbd_probe(struct serdev_device *serdev)
 		goto err_close;
 	}
 
+	/*
+	 * A dock attached before we were probed sent its handshake to nobody,
+	 * have extcon-p4note power it up again.
+	 */
+	ret = p4note_extcon_keyboard_ready(kbd->dock_edev);
+	if (ret) {
+		dev_err(dev, "dock extcon is not extcon-p4note: %d\n", ret);
+		goto err_unregister;
+	}
+
 	/* pick up a dock that was attached before we were probed */
 	schedule_work(&kbd->dock_work);
 
 	return 0;
 
+err_unregister:
+	extcon_unregister_notifier(kbd->dock_edev, EXTCON_DOCK, &kbd->dock_nb);
+	cancel_work_sync(&kbd->dock_work);
 err_close:
 	serdev_device_close(serdev);
 	return ret;
@@ -609,8 +612,8 @@ static void p4note_kbd_remove(struct serdev_device *serdev)
 	/* stop receive_buf from registering the input device again */
 	kbd->docked = false;
 	p4note_kbd_disconnect(kbd);
-	p4note_kbd_set_mhl(kbd, false);
 	mutex_unlock(&kbd->lock);
+	cancel_work_sync(&kbd->feedback_work);
 
 	serdev_device_close(serdev);
 }

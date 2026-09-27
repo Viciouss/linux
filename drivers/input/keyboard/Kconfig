@@ -544,7 +544,7 @@ config KEYBOARD_PXA930_ROTARY
 
 config KEYBOARD_P4NOTE_DOCK
 	tristate "Samsung Galaxy Note 10.1 (p4note) keyboard dock"
-	depends on SERIAL_DEV_BUS && EXTCON && OF
+	depends on SERIAL_DEV_BUS && EXTCON_P4NOTE && OF
 	help
 	  Say Y here to enable support for the keyboard dock of the Samsung
 	  Galaxy Note 10.1 (GT-N80xx), connected through the 30-pin dock
