@@ -1208,12 +1208,6 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};
 
-	cam_isx012_nrst: cam-isx012-nrst-pins {
-		samsung,pins = "gpl1-1";
-		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
-		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
-	};
-
 	cam_isx012_nstby: cam-isx012-nstby-pins {
 		samsung,pins = "gpj0-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
@@ -1354,6 +1348,12 @@
 
 	bt_shutdown: bt-shutdown-pins {
 		samsung,pins = "gpl0-6";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	cam_isx012_nrst: cam-isx012-nrst-pins {
+		samsung,pins = "gpl1-1";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 	};

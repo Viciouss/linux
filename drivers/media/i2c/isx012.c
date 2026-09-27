@@ -645,7 +645,7 @@ static void isx012_try_format(struct v4l2_mbus_framefmt *mf)
 }
 
 static int isx012_enum_mbus_code(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (code->index != 0)
@@ -656,7 +656,7 @@ static int isx012_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int isx012_enum_frame_size(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_pad_config *cfg,
+				   struct v4l2_subdev_state *sd_state,
 				   struct v4l2_subdev_frame_size_enum *fse)
 {
 	if (fse->index >= ARRAY_SIZE(isx012_framesizes))
@@ -670,17 +670,17 @@ static int isx012_enum_frame_size(struct v4l2_subdev *sd,
 }
 
 static struct v4l2_mbus_framefmt *isx012_get_pad_format(
-		struct isx012 *sensor, struct v4l2_subdev_pad_config *cfg,
+		struct isx012 *sensor, struct v4l2_subdev_state *sd_state,
 		u32 pad, enum v4l2_subdev_format_whence which)
 {
 	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return cfg ? v4l2_subdev_get_try_format(&sensor->sd, cfg, pad) : NULL;
+		return sd_state ? v4l2_subdev_get_try_format(&sensor->sd, sd_state, pad) : NULL;
 
 	return &sensor->format;
 }
 
 static int isx012_set_fmt(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_pad_config *cfg,
+			   struct v4l2_subdev_state *sd_state,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct isx012 *sensor = sd_to_isx012(sd);
@@ -689,7 +689,7 @@ static int isx012_set_fmt(struct v4l2_subdev *sd,
 
 	isx012_try_format(&fmt->format);
 
-	mf = isx012_get_pad_format(sensor, cfg, fmt->pad, fmt->which);
+	mf = isx012_get_pad_format(sensor, sd_state, fmt->pad, fmt->which);
 	if (!mf)
 		return 0;
 
@@ -704,13 +704,13 @@ static int isx012_set_fmt(struct v4l2_subdev *sd,
 }
 
 static int isx012_get_fmt(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_pad_config *cfg,
+			   struct v4l2_subdev_state *sd_state,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct isx012 *sensor = sd_to_isx012(sd);
 	struct v4l2_mbus_framefmt *mf;
 
-	mf = isx012_get_pad_format(sensor, cfg, fmt->pad, fmt->which);
+	mf = isx012_get_pad_format(sensor, sd_state, fmt->pad, fmt->which);
 	if (!mf)
 		return -EINVAL;
 
@@ -803,7 +803,7 @@ static const struct v4l2_subdev_video_ops isx012_video_ops = {
 static int isx012_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
 	struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_get_try_format(sd, fh->pad, 0);
+		v4l2_subdev_get_try_format(sd, fh->state, 0);
 
 	format->code = MEDIA_BUS_FMT_VYUY8_2X8;
 	format->field = V4L2_FIELD_NONE;
@@ -1053,7 +1053,7 @@ err_ctrl_free:
 	return ret;
 }
 
-static int isx012_remove(struct i2c_client *client)
+static void isx012_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct isx012 *sensor = sd_to_isx012(sd);
@@ -1070,7 +1070,6 @@ static int isx012_remove(struct i2c_client *client)
 	v4l2_ctrl_handler_free(&sensor->ctrl_handler);
 	media_entity_cleanup(&sd->entity);
 	mutex_destroy(&sensor->lock);
-	return 0;
 }
 
 static const struct i2c_device_id isx012_ids[] = {
