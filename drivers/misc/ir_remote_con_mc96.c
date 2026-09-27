@@ -514,14 +514,13 @@ static int mc96_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	return 0;
 }
 
-static int mc96_remove(struct i2c_client *client)
+static void mc96_remove(struct i2c_client *client)
 {
 	struct mc96_ir_data *data = i2c_get_clientdata(client);
 
 	device_unregister(data->sec_dev);
 	class_destroy(sec_class);
 	mutex_destroy(&data->mutex);
-	return 0;
 }
 
 static int __maybe_unused mc96_suspend(struct device *dev)

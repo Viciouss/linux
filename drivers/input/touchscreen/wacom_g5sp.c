@@ -665,7 +665,7 @@ err_power_off:
 	return ret;
 }
 
-static int wacom_g5sp_remove(struct i2c_client *client)
+static void wacom_g5sp_remove(struct i2c_client *client)
 {
 	struct wacom_g5sp *wac = i2c_get_clientdata(client);
 
@@ -674,8 +674,6 @@ static int wacom_g5sp_remove(struct i2c_client *client)
 	cancel_delayed_work_sync(&wac->insert_work);
 
 	wacom_g5sp_power_off(wac);
-
-	return 0;
 }
 
 static int __maybe_unused wacom_g5sp_suspend(struct device *dev)

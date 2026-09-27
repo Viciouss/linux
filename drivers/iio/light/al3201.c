@@ -331,13 +331,12 @@ static int al3201_probe(struct i2c_client *client,
 	return devm_iio_device_register(&client->dev, indio_dev);
 }
 
-static int al3201_remove(struct i2c_client *client)
+static void al3201_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct al3201_data *data = iio_priv(indio_dev);
 
 	al3201_set_power_state(data, 0);
-	return 0;
 }
 
 static const struct i2c_device_id al3201_id[] = {
