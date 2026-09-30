@@ -9,18 +9,24 @@
 
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/dma-mapping.h>
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
+#include <linux/delay.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
+#include <linux/workqueue.h>
 
 #include <video/of_display_timing.h>
 #include <video/of_videomode.h>
 #include <video/samsung_fimd.h>
 
+#include <drm/drm_atomic.h>
+#include <drm/drm_atomic_helper.h>
 #include <drm/drm_blend.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
@@ -90,6 +96,33 @@
 
 /* FIMD has totally five hardware windows. */
 #define WINDOWS_NR	5
+
+/*
+ * WINCONx.ENWIN and the SHADOWCON channel enables take effect immediately,
+ * not at vsync like the rest of the window setup. Turning a window on
+ * mid-frame therefore scans it out with its stale latched registers (old
+ * position, size and buffer address) until the next vsync, and turning it
+ * off tears the current frame. While the display is on, windows 1-4 are
+ * never switched off: a disabled plane is parked instead, i.e. pointed at a
+ * small fully transparent buffer through the shadowed registers. 128 pixels
+ * keeps the parked window on the 16-word DMA burst. Window 0 has no alpha,
+ * so it is still switched off.
+ */
+#define PARK_WIDTH	128
+#define PARK_HEIGHT	32
+#define PARK_PITCH	(PARK_WIDTH * 4)
+#define PARK_SIZE	(PARK_PITCH * PARK_HEIGHT)
+
+/*
+ * FIMD can stop scanning out mid-frame (seen with a window whose pitch is
+ * not a multiple of 8 bytes, and when a DMA channel is enabled mid-frame):
+ * the line counter stops, no frame interrupt comes and every later commit
+ * times out. Toggling ENVID restarts it. While the display is on, VIDCON1
+ * is checked every FIMD_HANG_CHECK_MS; unchanged over 3 ms means a hang,
+ * since vertical blanking only lasts a fraction of a millisecond.
+ */
+#define FIMD_HANG_CHECK_MS	50
+#define FIMD_HANG_SAMPLES	3
 
 /* HW trigger flag on i80 panel. */
 #define I80_HW_TRG     (1 << 1)
@@ -193,7 +226,19 @@ struct fimd_context {
 	atomic_t			wait_vsync_event;
 	atomic_t			win_updated;
 	atomic_t			triggering;
+	atomic_t			fifo_underruns;
+	atomic_t			hang_recoveries;
+	struct delayed_work		hang_work;
 	u32				clkdiv;
+	void				*park_vaddr;
+	dma_addr_t			park_dma;
+	resource_size_t			regs_size;
+	struct mutex			testbuf_lock;
+	void				*testbuf_vaddr;
+	dma_addr_t			testbuf_dma;
+	size_t				testbuf_size;
+	void __iomem			*sysmmu_regs;
+	struct clk			*sysmmu_clk;
 
 	const struct fimd_driver_data *driver_data;
 	struct drm_encoder *encoder;
@@ -303,7 +348,9 @@ static void fimd_disable_vblank(struct exynos_drm_crtc *crtc)
 	if (test_and_clear_bit(0, &ctx->irq_flags)) {
 		val = readl(ctx->regs + VIDINTCON0);
 
-		val &= ~VIDINTCON0_INT_ENABLE;
+		/* The FIFO underrun interrupt needs the global enable too. */
+		if (!(val & VIDINTCON0_INT_FIFO_EN))
+			val &= ~VIDINTCON0_INT_ENABLE;
 
 		if (ctx->i80_if) {
 			val &= ~VIDINTCON0_INT_I80IFDONE;
@@ -314,6 +361,40 @@ static void fimd_disable_vblank(struct exynos_drm_crtc *crtc)
 
 		writel(val, ctx->regs + VIDINTCON0);
 	}
+}
+
+/*
+ * Arm the FIFO-empty (underrun) interrupt for all windows. The handler
+ * disarms it on the first underrun, and the next atomic flush re-arms it,
+ * so fifo_underruns counts commits with at least one underrun instead of
+ * flooding the CPU with one interrupt per starved line.
+ */
+static void fimd_arm_fifo_irq(struct fimd_context *ctx)
+{
+	u32 val;
+
+	if (ctx->suspended || ctx->i80_if)
+		return;
+
+	val = readl(ctx->regs + VIDINTCON0);
+	if (val & VIDINTCON0_INT_FIFO_EN)
+		return;
+
+	val &= ~(VIDINTCON0_FIFIOSEL_MASK | VIDINTCON0_FIFOLEVEL_MASK);
+	val |= VIDINTCON0_FIFIOSEL_ALL | VIDINTCON0_FIFOLEVEL_EMPTY |
+	       VIDINTCON0_INT_FIFO_EN | VIDINTCON0_INT_ENABLE;
+	writel(val, ctx->regs + VIDINTCON0);
+}
+
+static void fimd_disarm_fifo_irq(struct fimd_context *ctx)
+{
+	u32 val;
+
+	val = readl(ctx->regs + VIDINTCON0);
+	val &= ~VIDINTCON0_INT_FIFO_EN;
+	if (!test_bit(0, &ctx->irq_flags))
+		val &= ~VIDINTCON0_INT_ENABLE;
+	writel(val, ctx->regs + VIDINTCON0);
 }
 
 static void fimd_wait_for_vblank(struct exynos_drm_crtc *crtc)
@@ -420,6 +501,22 @@ static int fimd_atomic_check(struct exynos_drm_crtc *crtc,
 	struct fimd_context *ctx = crtc->ctx;
 	unsigned long ideal_clk, lcd_rate;
 	u32 clkdiv;
+	const struct drm_plane_state *plane_state;
+	struct drm_plane *plane;
+
+	/*
+	 * VIDWxxADD2: PAGEWIDTH + OFFSIZE, i.e. the pitch, must be a multiple
+	 * of 8 bytes. Scanout stops at the end of such a window otherwise.
+	 */
+	drm_atomic_crtc_state_for_each_plane_state(plane, plane_state, state) {
+		if (plane_state->fb && plane_state->fb->pitches[0] % 8) {
+			DRM_DEV_DEBUG_KMS(ctx->dev,
+					  "[PLANE:%d] pitch %u not a multiple of 8\n",
+					  plane->base.id,
+					  plane_state->fb->pitches[0]);
+			return -EINVAL;
+		}
+	}
 
 	if (mode->clock == 0) {
 		DRM_DEV_ERROR(ctx->dev, "Mode has zero clock value.\n");
@@ -825,6 +922,8 @@ static void fimd_atomic_flush(struct exynos_drm_crtc *crtc)
 	for (i = 0; i < WINDOWS_NR; i++)
 		fimd_shadow_protect_win(ctx, i, false);
 
+	fimd_arm_fifo_irq(ctx);
+
 	exynos_crtc_handle_event(crtc);
 }
 
@@ -923,6 +1022,59 @@ static void fimd_update_plane(struct exynos_drm_crtc *crtc,
 		atomic_set(&ctx->win_updated, 1);
 }
 
+static void fimd_disable_win(struct fimd_context *ctx, unsigned int win)
+{
+	fimd_enable_video_output(ctx, win, false);
+
+	if (ctx->driver_data->has_shadowcon)
+		fimd_enable_shadow_channel_path(ctx, win, false);
+}
+
+static bool fimd_can_park_win(struct fimd_context *ctx, unsigned int win)
+{
+	return win != 0 && ctx->park_vaddr;
+}
+
+/*
+ * Point @win at the transparent parking buffer and keep it enabled. All
+ * registers written here are shadowed, so within a commit (shadow protect
+ * held) the window switches from its old content to the parked state at
+ * the next vsync, like any buffer change.
+ */
+static void fimd_park_win(struct fimd_context *ctx, unsigned int win)
+{
+	unsigned int last_x = PARK_WIDTH - 1, last_y = PARK_HEIGHT - 1;
+	u32 val;
+
+	writel(ctx->park_dma, ctx->regs + VIDWx_BUF_START(win, 0));
+	writel(ctx->park_dma + PARK_SIZE, ctx->regs + VIDWx_BUF_END(win, 0));
+
+	val = VIDW_BUF_SIZE_OFFSET(0) | VIDW_BUF_SIZE_PAGEWIDTH(PARK_PITCH) |
+		VIDW_BUF_SIZE_OFFSET_E(0) | VIDW_BUF_SIZE_PAGEWIDTH_E(PARK_PITCH);
+	writel(val, ctx->regs + VIDWx_BUF_SIZE(win, 0));
+
+	writel(0, ctx->regs + VIDOSD_A(win));
+	val = VIDOSDxB_BOTRIGHT_X(last_x) | VIDOSDxB_BOTRIGHT_Y(last_y) |
+		VIDOSDxB_BOTRIGHT_X_E(last_x) | VIDOSDxB_BOTRIGHT_Y_E(last_y);
+	writel(val, ctx->regs + VIDOSD_B(win));
+
+	/* Window 0 is never parked, so windows 1 and 2 have VIDOSD_D. */
+	if (win != 3 && win != 4)
+		writel(PARK_WIDTH * PARK_HEIGHT, ctx->regs + VIDOSD_D(win));
+
+	/* ARGB8888, all zero: premultiplied alpha blending leaves dst as is. */
+	val = WINCONx_ENWIN | WINCON1_BPPMODE_25BPP_A1888 | WINCONx_WSWP |
+		WINCONx_BURSTLEN_16WORD;
+	fimd_set_bits(ctx, WINCON(win), ~WINCONx_BLEND_MODE_MASK, val);
+	fimd_win_set_bldmod(ctx, win, DRM_BLEND_ALPHA_OPAQUE,
+			    DRM_MODE_BLEND_PREMULTI);
+	fimd_win_set_bldeq(ctx, win, DRM_BLEND_ALPHA_OPAQUE,
+			   DRM_MODE_BLEND_PREMULTI);
+
+	if (ctx->driver_data->has_shadowcon)
+		fimd_enable_shadow_channel_path(ctx, win, true);
+}
+
 static void fimd_disable_plane(struct exynos_drm_crtc *crtc,
 			       struct exynos_drm_plane *plane)
 {
@@ -932,15 +1084,63 @@ static void fimd_disable_plane(struct exynos_drm_crtc *crtc,
 	if (ctx->suspended)
 		return;
 
-	fimd_enable_video_output(ctx, win, false);
+	if (fimd_can_park_win(ctx, win))
+		fimd_park_win(ctx, win);
+	else
+		fimd_disable_win(ctx, win);
+}
 
-	if (ctx->driver_data->has_shadowcon)
-		fimd_enable_shadow_channel_path(ctx, win, false);
+static void fimd_restart_scanout(struct fimd_context *ctx, u32 vidcon1)
+{
+	u32 vidcon0 = readl(ctx->regs + VIDCON0);
+
+	writel(vidcon0 & ~(VIDCON0_ENVID | VIDCON0_ENVID_F),
+	       ctx->regs + VIDCON0);
+	writel(vidcon0 | VIDCON0_ENVID | VIDCON0_ENVID_F, ctx->regs + VIDCON0);
+
+	/* A hang leaves the FIFO underrun flag pending. */
+	writel(VIDINTCON1_INT_FIFO, ctx->regs + VIDINTCON1);
+
+	dev_warn(ctx->dev,
+		 "scanout hung at line %u (vstatus %u), restarted (#%d)\n",
+		 VIDCON1_LINECNT_GET(vidcon1),
+		 (vidcon1 & VIDCON1_VSTATUS_MASK) >> VIDCON1_VSTATUS_SHIFT,
+		 atomic_inc_return(&ctx->hang_recoveries));
+}
+
+static void fimd_hang_check(struct work_struct *work)
+{
+	struct fimd_context *ctx = container_of(to_delayed_work(work),
+						struct fimd_context, hang_work);
+	void __iomem *vidcon1 = ctx->regs + ctx->driver_data->timing_base +
+				VIDCON1;
+	u32 first;
+	int i;
+
+	/* Not active means the display is off; atomic_enable requeues. */
+	if (pm_runtime_get_if_active(ctx->dev, true) <= 0)
+		return;
+
+	first = readl(vidcon1);
+	for (i = 0; i < FIMD_HANG_SAMPLES; i++) {
+		usleep_range(1000, 1200);
+		if (readl(vidcon1) != first)
+			break;
+	}
+
+	if (i == FIMD_HANG_SAMPLES)
+		fimd_restart_scanout(ctx, first);
+
+	pm_runtime_put(ctx->dev);
+
+	queue_delayed_work(system_wq, &ctx->hang_work,
+			   msecs_to_jiffies(FIMD_HANG_CHECK_MS));
 }
 
 static void fimd_atomic_enable(struct exynos_drm_crtc *crtc)
 {
 	struct fimd_context *ctx = crtc->ctx;
+	unsigned int win;
 
 	if (!ctx->suspended)
 		return;
@@ -956,7 +1156,20 @@ static void fimd_atomic_enable(struct exynos_drm_crtc *crtc)
 	if (test_and_clear_bit(0, &ctx->irq_flags))
 		fimd_enable_vblank(ctx->crtc);
 
+	/*
+	 * Park windows 1-4 before video output starts, so they are enabled
+	 * with valid registers from the first frame on and plane updates
+	 * never have to switch ENWIN on mid-frame.
+	 */
+	for (win = 0; win < WINDOWS_NR; win++)
+		if (fimd_can_park_win(ctx, win))
+			fimd_park_win(ctx, win);
+
 	fimd_commit(ctx->crtc);
+
+	if (!ctx->i80_if)
+		queue_delayed_work(system_wq, &ctx->hang_work,
+				   msecs_to_jiffies(FIMD_HANG_CHECK_MS));
 }
 
 static void fimd_atomic_disable(struct exynos_drm_crtc *crtc)
@@ -967,13 +1180,18 @@ static void fimd_atomic_disable(struct exynos_drm_crtc *crtc)
 	if (ctx->suspended)
 		return;
 
+	/* Before anything is switched off; the work requeues itself. */
+	cancel_delayed_work_sync(&ctx->hang_work);
+
+	fimd_disarm_fifo_irq(ctx);
+
 	/*
 	 * We need to make sure that all windows are disabled before we
 	 * suspend that connector. Otherwise we might try to scan from
 	 * a destroyed buffer later.
 	 */
 	for (i = 0; i < WINDOWS_NR; i++)
-		fimd_disable_plane(crtc, &ctx->planes[i]);
+		fimd_disable_win(ctx, i);
 
 	fimd_enable_vblank(crtc);
 	fimd_wait_for_vblank(crtc);
@@ -1083,12 +1301,33 @@ static irqreturn_t fimd_irq_handler(int irq, void *dev_id)
 
 	val = readl(ctx->regs + VIDINTCON1);
 
+	if (val & VIDINTCON1_INT_FIFO) {
+		u32 enwin = 0;
+		int i;
+
+		fimd_disarm_fifo_irq(ctx);
+		writel(VIDINTCON1_INT_FIFO, ctx->regs + VIDINTCON1);
+
+		for (i = 0; i < WINDOWS_NR; i++)
+			if (readl(ctx->regs + WINCON(i)) & WINCONx_ENWIN)
+				enwin |= BIT(i);
+
+		dev_warn_ratelimited(ctx->dev,
+				     "FIFO underrun #%d, enabled windows 0x%02x\n",
+				     atomic_inc_return(&ctx->fifo_underruns),
+				     enwin);
+	}
+
 	clear_bit = ctx->i80_if ? VIDINTCON1_INT_I80 : VIDINTCON1_INT_FRAME;
 	if (val & clear_bit)
 		writel(clear_bit, ctx->regs + VIDINTCON1);
 
 	/* check the crtc is detached already from encoder */
 	if (!ctx->drm_dev)
+		goto out;
+
+	/* A FIFO-only interrupt is not a vblank. */
+	if (!ctx->i80_if && !(val & VIDINTCON1_INT_FRAME))
 		goto out;
 
 	if (!ctx->i80_if)
@@ -1107,6 +1346,19 @@ static irqreturn_t fimd_irq_handler(int irq, void *dev_id)
 
 out:
 	return IRQ_HANDLED;
+}
+
+/* Free the debug test buffer; caller holds testbuf_lock. */
+static void fimd_testbuf_free(struct fimd_context *ctx)
+{
+	if (!ctx->testbuf_vaddr)
+		return;
+
+	dma_free_attrs(to_dma_dev(ctx->drm_dev), ctx->testbuf_size,
+		       ctx->testbuf_vaddr, ctx->testbuf_dma,
+		       DMA_ATTR_WRITE_COMBINE);
+	ctx->testbuf_vaddr = NULL;
+	ctx->testbuf_size = 0;
 }
 
 static int fimd_bind(struct device *dev, struct device *master, void *data)
@@ -1159,7 +1411,20 @@ static int fimd_bind(struct device *dev, struct device *master, void *data)
 			return ret;
 	}
 
-	return exynos_drm_register_dma(drm_dev, dev, &ctx->dma_priv);
+	ret = exynos_drm_register_dma(drm_dev, dev, &ctx->dma_priv);
+	if (ret)
+		return ret;
+
+	/* Without the parking buffer, disabled windows are switched off. */
+	ctx->park_vaddr = dma_alloc_attrs(to_dma_dev(drm_dev), PARK_SIZE,
+					  &ctx->park_dma, GFP_KERNEL,
+					  DMA_ATTR_WRITE_COMBINE);
+	if (ctx->park_vaddr)
+		memset(ctx->park_vaddr, 0, PARK_SIZE);
+	else
+		dev_warn(dev, "no window parking buffer, windows will toggle\n");
+
+	return 0;
 }
 
 static void fimd_unbind(struct device *dev, struct device *master,
@@ -1168,6 +1433,17 @@ static void fimd_unbind(struct device *dev, struct device *master,
 	struct fimd_context *ctx = dev_get_drvdata(dev);
 
 	fimd_atomic_disable(ctx->crtc);
+
+	mutex_lock(&ctx->testbuf_lock);
+	fimd_testbuf_free(ctx);
+	mutex_unlock(&ctx->testbuf_lock);
+
+	if (ctx->park_vaddr) {
+		dma_free_attrs(to_dma_dev(ctx->drm_dev), PARK_SIZE,
+			       ctx->park_vaddr, ctx->park_dma,
+			       DMA_ATTR_WRITE_COMBINE);
+		ctx->park_vaddr = NULL;
+	}
 
 	exynos_drm_unregister_dma(ctx->drm_dev, ctx->dev, &ctx->dma_priv);
 
@@ -1180,11 +1456,33 @@ static const struct component_ops fimd_component_ops = {
 	.unbind = fimd_unbind,
 };
 
+/* Map FIMD's System MMU for the regs debug dump; optional. */
+static void fimd_map_sysmmu(struct fimd_context *ctx)
+{
+	struct device_node *np;
+	struct resource res;
+
+	np = of_parse_phandle(ctx->dev->of_node, "iommus", 0);
+	if (!np)
+		return;
+
+	if (!of_address_to_resource(np, 0, &res))
+		ctx->sysmmu_regs = devm_ioremap(ctx->dev, res.start,
+						resource_size(&res));
+
+	ctx->sysmmu_clk = of_clk_get_by_name(np, "sysmmu");
+	if (IS_ERR(ctx->sysmmu_clk))
+		ctx->sysmmu_clk = NULL;
+
+	of_node_put(np);
+}
+
 static int fimd_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct fimd_context *ctx;
 	struct device_node *i80_if_timings;
+	struct resource *res;
 	int ret;
 
 	if (!dev->of_node)
@@ -1253,9 +1551,12 @@ static int fimd_probe(struct platform_device *pdev)
 		return PTR_ERR(ctx->lcd_clk);
 	}
 
-	ctx->regs = devm_platform_ioremap_resource(pdev, 0);
+	ctx->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(ctx->regs))
 		return PTR_ERR(ctx->regs);
+	ctx->regs_size = resource_size(res);
+
+	fimd_map_sysmmu(ctx);
 
 	ret = platform_get_irq_byname(pdev, ctx->i80_if ? "lcd_sys" : "vsync");
 	if (ret < 0)
@@ -1268,6 +1569,8 @@ static int fimd_probe(struct platform_device *pdev)
 	}
 
 	init_waitqueue_head(&ctx->wait_vsync_queue);
+	mutex_init(&ctx->testbuf_lock);
+	INIT_DELAYED_WORK(&ctx->hang_work, fimd_hang_check);
 	atomic_set(&ctx->wait_vsync_event, 0);
 
 	platform_set_drvdata(pdev, ctx);
@@ -1292,7 +1595,12 @@ err_disable_pm_runtime:
 
 static int fimd_remove(struct platform_device *pdev)
 {
+	struct fimd_context *ctx = platform_get_drvdata(pdev);
+
 	pm_runtime_disable(&pdev->dev);
+
+	if (ctx->sysmmu_clk)
+		clk_put(ctx->sysmmu_clk);
 
 	component_del(&pdev->dev, &fimd_component_ops);
 
@@ -1341,12 +1649,258 @@ static const struct dev_pm_ops exynos_fimd_pm_ops = {
 				pm_runtime_force_resume)
 };
 
+static ssize_t fifo_underruns_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct fimd_context *ctx = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", atomic_read(&ctx->fifo_underruns));
+}
+static DEVICE_ATTR_RO(fifo_underruns);
+
+static ssize_t hang_recoveries_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct fimd_context *ctx = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", atomic_read(&ctx->hang_recoveries));
+}
+static DEVICE_ATTR_RO(hang_recoveries);
+
+/* System MMU v1-v3 registers, see drivers/iommu/exynos-iommu.c */
+#define SYSMMU_CTRL		0x000
+#define SYSMMU_CFG		0x004
+#define SYSMMU_STATUS		0x008
+#define SYSMMU_PT_BASE		0x014
+#define SYSMMU_INT_STATUS	0x018
+#define SYSMMU_PAGE_FAULT	0x024
+#define SYSMMU_AW_FAULT		0x028
+#define SYSMMU_AR_FAULT		0x02c
+#define SYSMMU_DEFAULT_SLAVE	0x030
+#define SYSMMU_VERSION		0x034
+
+/* SHD_VIDWxxADD0/1/2: the buffer registers' latched values, at +0x4000. */
+#define FIMD_ACTIVE(reg)	((reg) + 0x4000)
+
+/*
+ * Debug dump of the FIMD and FIMD System MMU state, readable while the
+ * display is stuck: whether scanout still runs (line counter), pending
+ * interrupts, and per window the programmed vs. latched setup.
+ */
+static ssize_t regs_show(struct device *dev, struct device_attribute *attr,
+			 char *buf)
+{
+	struct fimd_context *ctx = dev_get_drvdata(dev);
+	void __iomem *regs = ctx->regs;
+	void __iomem *timing = regs + ctx->driver_data->timing_base;
+	unsigned int win;
+	u32 vidcon1, vidcon1_later;
+	int len = 0;
+
+	if (pm_runtime_get_if_active(dev, true) <= 0)
+		return sysfs_emit(buf, "suspended\n");
+
+	vidcon1 = readl(timing + VIDCON1);
+	udelay(500);
+	vidcon1_later = readl(timing + VIDCON1);
+
+	len += sysfs_emit_at(buf, len, "VIDCON0    %08x\n",
+			     readl(regs + VIDCON0));
+	len += sysfs_emit_at(buf, len,
+			     "VIDCON1    %08x line %u vstatus %u, 500us later %08x line %u vstatus %u\n",
+			     vidcon1, VIDCON1_LINECNT_GET(vidcon1),
+			     (vidcon1 & VIDCON1_VSTATUS_MASK) >> VIDCON1_VSTATUS_SHIFT,
+			     vidcon1_later, VIDCON1_LINECNT_GET(vidcon1_later),
+			     (vidcon1_later & VIDCON1_VSTATUS_MASK) >>
+			     VIDCON1_VSTATUS_SHIFT);
+	len += sysfs_emit_at(buf, len, "VIDINTCON0 %08x VIDINTCON1 %08x\n",
+			     readl(regs + VIDINTCON0),
+			     readl(regs + VIDINTCON1));
+	len += sysfs_emit_at(buf, len, "SHADOWCON  %08x BLENDCON %08x\n",
+			     readl(regs + SHADOWCON), readl(regs + BLENDCON));
+
+	len += sysfs_emit_at(buf, len,
+			     "win WINCON OSD_A OSD_B, programmed/latched: START END SIZE\n");
+	for (win = 0; win < WINDOWS_NR; win++) {
+		u32 reg[] = {
+			VIDWx_BUF_START(win, 0), VIDWx_BUF_END(win, 0),
+			VIDWx_BUF_SIZE(win, 0),
+		};
+		unsigned int i;
+
+		len += sysfs_emit_at(buf, len, "win%u %08x %08x %08x", win,
+				     readl(regs + WINCON(win)),
+				     readl(regs + VIDOSD_A(win)),
+				     readl(regs + VIDOSD_B(win)));
+		for (i = 0; i < ARRAY_SIZE(reg); i++)
+			len += sysfs_emit_at(buf, len, " %08x/%08x",
+					     readl(regs + reg[i]),
+					     readl(regs + FIMD_ACTIVE(reg[i])));
+		len += sysfs_emit_at(buf, len, "\n");
+	}
+
+	if (ctx->sysmmu_regs &&
+	    (!ctx->sysmmu_clk || !clk_prepare_enable(ctx->sysmmu_clk))) {
+		void __iomem *mmu = ctx->sysmmu_regs;
+
+		len += sysfs_emit_at(buf, len,
+				     "SYSMMU CTRL %08x CFG %08x STATUS %08x PT_BASE %08x INT_STATUS %08x VERSION %08x\n",
+				     readl(mmu + SYSMMU_CTRL),
+				     readl(mmu + SYSMMU_CFG),
+				     readl(mmu + SYSMMU_STATUS),
+				     readl(mmu + SYSMMU_PT_BASE),
+				     readl(mmu + SYSMMU_INT_STATUS),
+				     readl(mmu + SYSMMU_VERSION));
+		len += sysfs_emit_at(buf, len,
+				     "SYSMMU PAGE_FAULT %08x AW_FAULT %08x AR_FAULT %08x DEFAULT_SLAVE %08x\n",
+				     readl(mmu + SYSMMU_PAGE_FAULT),
+				     readl(mmu + SYSMMU_AW_FAULT),
+				     readl(mmu + SYSMMU_AR_FAULT),
+				     readl(mmu + SYSMMU_DEFAULT_SLAVE));
+		if (ctx->sysmmu_clk)
+			clk_disable_unprepare(ctx->sysmmu_clk);
+	}
+
+	pm_runtime_put(dev);
+
+	return len;
+}
+/*
+ * Debug: "<offset> <value>" (hex) writes one FIMD register, for simulating
+ * hangs and testing recovery. Bypasses DRM, so only touch parked windows.
+ */
+static ssize_t regs_store(struct device *dev, struct device_attribute *attr,
+			  const char *buf, size_t count)
+{
+	struct fimd_context *ctx = dev_get_drvdata(dev);
+	u32 offset, val;
+
+	if (sscanf(buf, "%x %x", &offset, &val) != 2)
+		return -EINVAL;
+
+	if (offset % 4 || offset >= ctx->regs_size)
+		return -EINVAL;
+
+	if (pm_runtime_get_if_active(dev, true) <= 0)
+		return -EAGAIN;
+
+	writel(val, ctx->regs + offset);
+	dev_info(dev, "debug write %05x = %08x\n", offset, val);
+
+	pm_runtime_put(dev);
+
+	return count;
+}
+static DEVICE_ATTR_RW(regs);
+
+/*
+ * Debug: a zeroed (transparent) buffer to point a parked window at with
+ * the regs file, for reproducing scanout hangs with real-sized windows.
+ * Write "<size>" (hex bytes) to allocate, "0" to free; read for its address.
+ */
+static ssize_t testbuf_show(struct device *dev, struct device_attribute *attr,
+			    char *buf)
+{
+	struct fimd_context *ctx = dev_get_drvdata(dev);
+	ssize_t len;
+
+	mutex_lock(&ctx->testbuf_lock);
+	if (ctx->testbuf_vaddr)
+		len = sysfs_emit(buf, "%08llx %zx\n",
+				 (unsigned long long)ctx->testbuf_dma,
+				 ctx->testbuf_size);
+	else
+		len = sysfs_emit(buf, "none\n");
+	mutex_unlock(&ctx->testbuf_lock);
+
+	return len;
+}
+
+/* True if any window's programmed or latched buffer lies in the test buffer. */
+static bool fimd_testbuf_in_use(struct fimd_context *ctx)
+{
+	dma_addr_t start = ctx->testbuf_dma;
+	dma_addr_t end = start + ctx->testbuf_size;
+	unsigned int win;
+	bool busy = false;
+
+	if (pm_runtime_get_if_active(ctx->dev, true) <= 0)
+		return false;
+
+	for (win = 0; win < WINDOWS_NR && !busy; win++) {
+		u32 prog = readl(ctx->regs + VIDWx_BUF_START(win, 0));
+		u32 latched = readl(ctx->regs +
+				    FIMD_ACTIVE(VIDWx_BUF_START(win, 0)));
+
+		busy = (prog >= start && prog < end) ||
+		       (latched >= start && latched < end);
+	}
+
+	pm_runtime_put(ctx->dev);
+
+	return busy;
+}
+
+static ssize_t testbuf_store(struct device *dev, struct device_attribute *attr,
+			     const char *buf, size_t count)
+{
+	struct fimd_context *ctx = dev_get_drvdata(dev);
+	unsigned long size;
+	int ret = 0;
+
+	if (kstrtoul(buf, 16, &size))
+		return -EINVAL;
+
+	if (!ctx->drm_dev)
+		return -ENODEV;
+
+	mutex_lock(&ctx->testbuf_lock);
+
+	if (ctx->testbuf_vaddr && fimd_testbuf_in_use(ctx)) {
+		ret = -EBUSY;
+		goto out;
+	}
+	fimd_testbuf_free(ctx);
+
+	if (size) {
+		size = PAGE_ALIGN(size);
+		ctx->testbuf_vaddr = dma_alloc_attrs(to_dma_dev(ctx->drm_dev),
+						     size, &ctx->testbuf_dma,
+						     GFP_KERNEL,
+						     DMA_ATTR_WRITE_COMBINE);
+		if (!ctx->testbuf_vaddr) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		memset(ctx->testbuf_vaddr, 0, size);
+		ctx->testbuf_size = size;
+		dev_info(dev, "debug test buffer %08llx size %lx\n",
+			 (unsigned long long)ctx->testbuf_dma, size);
+	}
+
+out:
+	mutex_unlock(&ctx->testbuf_lock);
+
+	return ret ? ret : count;
+}
+static DEVICE_ATTR_RW(testbuf);
+
+static struct attribute *fimd_attrs[] = {
+	&dev_attr_fifo_underruns.attr,
+	&dev_attr_hang_recoveries.attr,
+	&dev_attr_regs.attr,
+	&dev_attr_testbuf.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(fimd);
+
 struct platform_driver fimd_driver = {
 	.probe		= fimd_probe,
 	.remove		= fimd_remove,
 	.driver		= {
 		.name	= "exynos4-fb",
 		.owner	= THIS_MODULE,
+		.dev_groups = fimd_groups,
 		.pm	= &exynos_fimd_pm_ops,
 		.of_match_table = fimd_driver_dt_match,
 	},
