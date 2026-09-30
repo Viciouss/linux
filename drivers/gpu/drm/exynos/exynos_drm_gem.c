@@ -10,7 +10,9 @@
 #include <linux/pfn_t.h>
 #include <linux/shmem_fs.h>
 #include <linux/module.h>
+#include <linux/pagemap.h>
 
+#include <drm/drm_drv.h>
 #include <drm/drm_prime.h>
 #include <drm/drm_vma_manager.h>
 #include <drm/exynos_drm.h>
@@ -86,6 +88,72 @@ static void exynos_drm_free_buf(struct exynos_drm_gem *exynos_gem)
 			exynos_gem->dma_attrs);
 }
 
+/*
+ * dma_alloc_attrs() memory is never mapped cacheable to userspace on ARM,
+ * whatever the attrs, so EXYNOS_BO_CACHABLE is backed by shmem pages mapped
+ * through the IOMMU instead. The IOMMU makes them contiguous for the display
+ * and GPU; userspace keeps the CPU caches coherent with DMA_BUF_IOCTL_SYNC.
+ */
+static int exynos_drm_alloc_cached_buf(struct exynos_drm_gem *exynos_gem)
+{
+	struct drm_gem_object *obj = &exynos_gem->base;
+	struct device *dma_dev = to_dma_dev(obj->dev);
+	struct sg_table *sgt;
+	struct page **pages;
+	int ret;
+
+	/* The pages stay pinned, so keep them out of ZONE_MOVABLE and CMA. */
+	mapping_set_gfp_mask(obj->filp->f_mapping, GFP_HIGHUSER);
+
+	pages = drm_gem_get_pages(obj);
+	if (IS_ERR(pages))
+		return PTR_ERR(pages);
+
+	sgt = drm_prime_pages_to_sg(obj->dev, pages, obj->size >> PAGE_SHIFT);
+	if (IS_ERR(sgt)) {
+		ret = PTR_ERR(sgt);
+		goto err_put_pages;
+	}
+
+	/* Without DMA_ATTR_SKIP_CPU_SYNC this also cleans the zeroed pages. */
+	ret = dma_map_sgtable(dma_dev, sgt, DMA_BIDIRECTIONAL, 0);
+	if (ret)
+		goto err_free_sgt;
+
+	if (drm_prime_get_contiguous_size(sgt) < obj->size) {
+		DRM_DEV_ERROR(dma_dev, "cached buffer is not contiguous in DMA space\n");
+		ret = -ENOMEM;
+		goto err_unmap;
+	}
+
+	exynos_gem->pages = pages;
+	exynos_gem->sgt = sgt;
+	exynos_gem->dma_addr = sg_dma_address(sgt->sgl);
+
+	DRM_DEV_DEBUG_KMS(dma_dev, "cached dma_addr(0x%lx), size(0x%lx)\n",
+			  (unsigned long)exynos_gem->dma_addr, exynos_gem->size);
+	return 0;
+
+err_unmap:
+	dma_unmap_sgtable(dma_dev, sgt, DMA_BIDIRECTIONAL, 0);
+err_free_sgt:
+	sg_free_table(sgt);
+	kfree(sgt);
+err_put_pages:
+	drm_gem_put_pages(obj, pages, false, false);
+	return ret;
+}
+
+static void exynos_drm_free_cached_buf(struct exynos_drm_gem *exynos_gem)
+{
+	struct drm_gem_object *obj = &exynos_gem->base;
+
+	dma_unmap_sgtable(to_dma_dev(obj->dev), exynos_gem->sgt, DMA_BIDIRECTIONAL, 0);
+	sg_free_table(exynos_gem->sgt);
+	kfree(exynos_gem->sgt);
+	drm_gem_put_pages(obj, exynos_gem->pages, true, false);
+}
+
 static int exynos_drm_gem_handle_create(struct drm_gem_object *obj,
 					struct drm_file *file_priv,
 					unsigned int *handle)
@@ -123,6 +191,8 @@ void exynos_drm_gem_destroy(struct exynos_drm_gem *exynos_gem)
 	 */
 	if (obj->import_attach)
 		drm_prime_gem_destroy(obj, exynos_gem->sgt);
+	else if (exynos_gem->pages)
+		exynos_drm_free_cached_buf(exynos_gem);
 	else
 		exynos_drm_free_buf(exynos_gem);
 
@@ -132,6 +202,68 @@ void exynos_drm_gem_destroy(struct exynos_drm_gem *exynos_gem)
 	kfree(exynos_gem);
 }
 
+static int exynos_drm_gem_dmabuf_begin_cpu_access(struct dma_buf *dma_buf,
+						  enum dma_data_direction dir)
+{
+	struct drm_gem_object *obj = dma_buf->priv;
+	struct exynos_drm_gem *exynos_gem = to_exynos_gem(obj);
+
+	if (!exynos_gem->pages)
+		return 0;
+
+	/*
+	 * Invalidate even for write-only access: a partial write to a stale
+	 * clean line would otherwise write stale bytes back over device data.
+	 */
+	dma_sync_sgtable_for_cpu(to_dma_dev(obj->dev), exynos_gem->sgt, DMA_FROM_DEVICE);
+	return 0;
+}
+
+static int exynos_drm_gem_dmabuf_end_cpu_access(struct dma_buf *dma_buf,
+						enum dma_data_direction dir)
+{
+	struct drm_gem_object *obj = dma_buf->priv;
+	struct exynos_drm_gem *exynos_gem = to_exynos_gem(obj);
+
+	if (!exynos_gem->pages || dir == DMA_FROM_DEVICE)
+		return 0;
+
+	dma_sync_sgtable_for_device(to_dma_dev(obj->dev), exynos_gem->sgt, DMA_TO_DEVICE);
+	return 0;
+}
+
+/* drm_gem_prime_dmabuf_ops plus CPU access hooks for cached buffers */
+static const struct dma_buf_ops exynos_drm_gem_dmabuf_ops = {
+	.cache_sgt_mapping = true,
+	.attach = drm_gem_map_attach,
+	.detach = drm_gem_map_detach,
+	.map_dma_buf = drm_gem_map_dma_buf,
+	.unmap_dma_buf = drm_gem_unmap_dma_buf,
+	.release = drm_gem_dmabuf_release,
+	.mmap = drm_gem_dmabuf_mmap,
+	.vmap = drm_gem_dmabuf_vmap,
+	.vunmap = drm_gem_dmabuf_vunmap,
+	.begin_cpu_access = exynos_drm_gem_dmabuf_begin_cpu_access,
+	.end_cpu_access = exynos_drm_gem_dmabuf_end_cpu_access,
+};
+
+static struct dma_buf *exynos_drm_gem_prime_export(struct drm_gem_object *obj,
+						   int flags)
+{
+	struct drm_device *dev = obj->dev;
+	struct dma_buf_export_info exp_info = {
+		.exp_name = KBUILD_MODNAME,
+		.owner = dev->driver->fops->owner,
+		.ops = &exynos_drm_gem_dmabuf_ops,
+		.size = obj->size,
+		.flags = flags,
+		.priv = obj,
+		.resv = obj->resv,
+	};
+
+	return drm_gem_dmabuf_export(dev, &exp_info);
+}
+
 static const struct vm_operations_struct exynos_drm_gem_vm_ops = {
 	.open = drm_gem_vm_open,
 	.close = drm_gem_vm_close,
@@ -139,6 +271,7 @@ static const struct vm_operations_struct exynos_drm_gem_vm_ops = {
 
 static const struct drm_gem_object_funcs exynos_drm_gem_object_funcs = {
 	.free = exynos_drm_gem_free_object,
+	.export = exynos_drm_gem_prime_export,
 	.get_sg_table = exynos_drm_gem_prime_get_sg_table,
 	.mmap = exynos_drm_gem_mmap,
 	.vm_ops = &exynos_drm_gem_vm_ops,
@@ -216,7 +349,11 @@ struct exynos_drm_gem *exynos_drm_gem_create(struct drm_device *dev,
 	/* set memory type and cache attribute from user side. */
 	exynos_gem->flags = flags;
 
-	ret = exynos_drm_alloc_buf(exynos_gem, kvmap);
+	if (!kvmap && (flags & EXYNOS_BO_NONCONTIG) &&
+	    (flags & EXYNOS_BO_CACHABLE) && !(flags & EXYNOS_BO_WC))
+		ret = exynos_drm_alloc_cached_buf(exynos_gem);
+	else
+		ret = exynos_drm_alloc_buf(exynos_gem, kvmap);
 	if (ret < 0) {
 		drm_gem_object_release(&exynos_gem->base);
 		kfree(exynos_gem);
@@ -283,6 +420,10 @@ static int exynos_drm_gem_mmap_buffer(struct exynos_drm_gem *exynos_gem,
 	if (vm_size > exynos_gem->size)
 		return -EINVAL;
 
+	if (exynos_gem->pages)
+		return vm_map_pages(vma, exynos_gem->pages,
+				    exynos_gem->size >> PAGE_SHIFT);
+
 	ret = dma_mmap_attrs(to_dma_dev(drm_dev), vma, exynos_gem->cookie,
 			     exynos_gem->dma_addr, exynos_gem->size,
 			     exynos_gem->dma_attrs);
@@ -336,7 +477,12 @@ int exynos_drm_gem_dumb_create(struct drm_file *file_priv,
 	 *	with DRM_IOCTL_MODE_CREATE_DUMB command.
 	 */
 
-	args->pitch = args->width * ((args->bpp + 7) / 8);
+	/*
+	 * Exynos FIMD requires the pitch (PAGEWIDTH + OFFSIZE) to be a multiple
+	 * of 8 bytes and hangs mid-frame otherwise. Buffers from minigbm
+	 * already meet this; odd-width dumb buffers did not.
+	 */
+	args->pitch = ALIGN(args->width * ((args->bpp + 7) / 8), 8);
 	args->size = args->pitch * args->height;
 
 	if (is_drm_iommu_supported(dev))
@@ -399,6 +545,20 @@ err_close_vm:
 struct drm_gem_object *exynos_drm_gem_prime_import(struct drm_device *dev,
 					    struct dma_buf *dma_buf)
 {
+	/*
+	 * drm_gem_prime_import_dev() only recognises its own dmabuf ops, so
+	 * take the same self-import shortcut for ours: re-importing a buffer
+	 * we exported must give back the original object, not an attachment.
+	 */
+	if (dma_buf->ops == &exynos_drm_gem_dmabuf_ops) {
+		struct drm_gem_object *obj = dma_buf->priv;
+
+		if (obj->dev == dev) {
+			drm_gem_object_get(obj);
+			return obj;
+		}
+	}
+
 	return drm_gem_prime_import_dev(dev, dma_buf, to_dma_dev(dev));
 }
 
@@ -408,6 +568,10 @@ struct sg_table *exynos_drm_gem_prime_get_sg_table(struct drm_gem_object *obj)
 	struct drm_device *drm_dev = obj->dev;
 	struct sg_table *sgt;
 	int ret;
+
+	if (exynos_gem->pages)
+		return drm_prime_pages_to_sg(drm_dev, exynos_gem->pages,
+					     exynos_gem->size >> PAGE_SHIFT);
 
 	sgt = kzalloc(sizeof(*sgt), GFP_KERNEL);
 	if (!sgt)
