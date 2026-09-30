@@ -30,7 +30,10 @@
  *	- this address could be physical address without IOMMU and
  *	device address with IOMMU.
  * @dma_attrs: attrs passed dma mapping framework
- * @sgt: Imported sg_table.
+ * @sgt: Imported sg_table, or for a cached buffer the sg_table of @pages
+ *	mapped to the DRM DMA device.
+ * @pages: shmem pages backing a cached buffer (EXYNOS_BO_CACHABLE |
+ *	EXYNOS_BO_NONCONTIG with IOMMU), NULL otherwise.
  *
  * P.S. this object would be transferred to user as kms_bo.handle so
  *	user can access the buffer through kms_bo.handle.
@@ -44,6 +47,7 @@ struct exynos_drm_gem {
 	dma_addr_t		dma_addr;
 	unsigned long		dma_attrs;
 	struct sg_table		*sgt;
+	struct page		**pages;
 };
 
 /* destroy a buffer with gem object */
