@@ -1859,8 +1859,8 @@ static inline int s5p_mfc_run_enc_frame(struct s5p_mfc_ctx *ctx)
 			s5p_mfc_set_enc_frame_buffer_v6(ctx, 0, 0);
 			ctx->state = MFCINST_FINISHING;
 		} else {
-			src_y_addr = vb2_dma_contig_plane_dma_addr(&src_mb->b->vb2_buf, 0);
-			src_c_addr = vb2_dma_contig_plane_dma_addr(&src_mb->b->vb2_buf, 1);
+			src_y_addr = s5p_mfc_enc_src_addr(&src_mb->b->vb2_buf, 0);
+			src_c_addr = s5p_mfc_enc_src_addr(&src_mb->b->vb2_buf, 1);
 
 			mfc_debug(2, "enc src y addr: 0x%08lx\n", src_y_addr);
 			mfc_debug(2, "enc src c addr: 0x%08lx\n", src_c_addr);

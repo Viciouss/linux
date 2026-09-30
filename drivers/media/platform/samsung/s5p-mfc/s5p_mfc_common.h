@@ -45,6 +45,8 @@
 #define MFC_MAX_EXTRA_DPB       5
 #define MFC_MAX_BUFFERS		32
 #define MFC_NUM_CONTEXTS	4
+/* Decoder frame tags remembered, more than frames can wait in the DPB */
+#define MFC_DEC_TAGS		64
 /* Interrupt timeout */
 #define MFC_INT_TIMEOUT		2000
 /* Busy wait timeout */
@@ -622,6 +624,20 @@ struct s5p_mfc_codec_ops {
  * @ctrl_handler:	handler for v4l2 framework
  * @scratch_buf_size:	scratch buffer size
  */
+/**
+ * struct s5p_mfc_dec_tag - timestamp of a decoded source buffer
+ * @tag:		frame tag given to the hardware, 0 if unused
+ * @timestamp:		vb2 timestamp of the source buffer
+ * @timecode:		timecode of the source buffer
+ * @tstamp_flags:	V4L2_BUF_FLAG_TSTAMP_SRC_MASK flags of the source buffer
+ */
+struct s5p_mfc_dec_tag {
+	u32 tag;
+	u64 timestamp;
+	struct v4l2_timecode timecode;
+	u32 tstamp_flags;
+};
+
 struct s5p_mfc_ctx {
 	struct s5p_mfc_dev *dev;
 	struct v4l2_fh fh;
@@ -687,6 +703,14 @@ struct s5p_mfc_ctx {
 	int display_delay_enable;
 	int after_packed_pb;
 	int sei_fp_parse;
+
+	/*
+	 * MFC v5 decoder: frames are displayed after being decoded when they
+	 * are reordered. The hardware carries a tag from each decoded source
+	 * buffer to the displayed frame, which maps back to the timestamp.
+	 */
+	struct s5p_mfc_dec_tag dec_tags[MFC_DEC_TAGS];
+	u32 dec_next_tag;
 
 	int pb_count;
 	int total_dpb_count;
@@ -788,5 +812,17 @@ void s5p_mfc_cleanup_queue(struct list_head *lh, struct vb2_queue *vq);
 #define MFC_V6PLUS_BITS		(MFC_V6_BIT | MFC_V7_BIT | MFC_V8_BIT | \
 					MFC_V10_BIT)
 #define MFC_V7PLUS_BITS		(MFC_V7_BIT | MFC_V8_BIT | MFC_V10_BIT)
+
+/*
+ * DMA address of plane |plane| of an encoder source buffer. Userspace that
+ * hands in all planes of a frame in one DMA-buf (e.g. v4l2_codec2 with a
+ * gralloc NV12 buffer) passes the position of each plane in data_offset.
+ */
+static inline dma_addr_t s5p_mfc_enc_src_addr(struct vb2_buffer *vb,
+					      unsigned int plane)
+{
+	return vb2_dma_contig_plane_dma_addr(vb, plane) +
+	       vb->planes[plane].data_offset;
+}
 
 #endif /* S5P_MFC_COMMON_H_ */

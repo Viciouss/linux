@@ -134,6 +134,14 @@ static struct fimc_fmt fimc_formats[] = {
 		.colplanes	= 3,
 		.flags		= FMT_FLAGS_M2M,
 	}, {
+		/* YUV420 with swapped chroma planes, see fimc_prepare_addr() */
+		.fourcc		= V4L2_PIX_FMT_YVU420,
+		.depth		= { 12 },
+		.color		= FIMC_FMT_YCBCR420,
+		.memplanes	= 1,
+		.colplanes	= 3,
+		.flags		= FMT_FLAGS_M2M,
+	}, {
 		.fourcc		= V4L2_PIX_FMT_NV12,
 		.depth		= { 12 },
 		.color		= FIMC_FMT_YCBCR420,
@@ -360,6 +368,9 @@ int fimc_prepare_addr(struct fimc_ctx *ctx, struct vb2_buffer *vb,
 				addr->cr = (u32)(addr->cb + (pix_size >> 2));
 			else /* 422 */
 				addr->cr = (u32)(addr->cb + (pix_size >> 1));
+			/* The Cr plane comes first in memory */
+			if (frame->fmt->fourcc == V4L2_PIX_FMT_YVU420)
+				swap(addr->cb, addr->cr);
 			break;
 		default:
 			return -EINVAL;

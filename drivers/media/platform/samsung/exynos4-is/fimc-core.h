@@ -136,6 +136,11 @@ enum fimc_color_fmt {
 /* Y (16 ~ 235), Cb/Cr (16 ~ 240) */
 #define	FIMC_COLOR_RANGE_NARROW		(1 << 3)
 
+/* Colour space conversion equation */
+#define FIMC_CSC_BY_SIZE	0	/* ITU-R BT.709 from 1280 pixels wide */
+#define FIMC_CSC_601		1
+#define FIMC_CSC_709		2
+
 /**
  * struct fimc_dma_offset - pixel offset information for DMA
  * @y_h:	y value horizontal offset
@@ -471,6 +476,11 @@ struct fimc_ctrls {
  * @vflip:		indicates image vertical flip if set
  * @flags:		additional flags for image conversion
  * @state:		flags to keep track of user configuration
+ * @src_ycbcr_enc:	V4L2_YCBCR_ENC_* requested for the m2m source
+ * @src_quantization:	V4L2_QUANTIZATION_* requested for the m2m source
+ * @dst_ycbcr_enc:	V4L2_YCBCR_ENC_* requested for the m2m destination
+ * @dst_quantization:	V4L2_QUANTIZATION_* requested for the m2m destination
+ * @csc:		colour space conversion equation, FIMC_CSC_*
  * @fimc_dev:		the FIMC device this context applies to
  * @fh:			v4l2 file handle
  * @ctrls:		v4l2 controls structure
@@ -491,6 +501,11 @@ struct fimc_ctx {
 	unsigned int		vflip:1;
 	u32			flags;
 	u32			state;
+	u8			src_ycbcr_enc;
+	u8			src_quantization;
+	u8			dst_ycbcr_enc;
+	u8			dst_quantization;
+	u8			csc;
 	struct fimc_dev		*fimc_dev;
 	struct v4l2_fh		fh;
 	struct fimc_ctrls	ctrls;
