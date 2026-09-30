@@ -1052,6 +1052,13 @@ static void s5p_mfc_stop_streaming(struct vb2_queue *q)
 		ctx->state ==  MFCINST_RUNNING) &&
 		dev->curr_ctx == ctx->num && dev->hw_lock) {
 		ctx->state = MFCINST_ABORT;
+		/*
+		 * The frame done interrupt calls try_run(), which would pick
+		 * this context again and clear its interrupt flags before
+		 * finding nothing to do in the aborting state, so the wait
+		 * below would miss the interrupt and time out.
+		 */
+		clear_work_bit(ctx);
 		spin_unlock_irqrestore(&dev->irqlock, flags);
 		s5p_mfc_wait_for_done_ctx(ctx,
 					S5P_MFC_R2H_CMD_FRAME_DONE_RET, 0);

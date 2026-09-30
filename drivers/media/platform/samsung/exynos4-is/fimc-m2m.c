@@ -335,6 +335,35 @@ static void __set_frame_format(struct fimc_frame *frame, struct fimc_fmt *fmt,
 	frame->fmt = fmt;
 }
 
+/*
+ * Pick the colour space conversion equation and YCbCr range from the
+ * encoding and quantization userspace requested for the YCbCr side.
+ * Without a request, keep the defaults: full range, equation by size.
+ */
+static void fimc_m2m_update_csc(struct fimc_ctx *ctx)
+{
+	bool src_rgb = ctx->s_frame.fmt && fimc_fmt_is_rgb(ctx->s_frame.fmt->color);
+	u8 ycbcr_enc = src_rgb ? ctx->dst_ycbcr_enc : ctx->src_ycbcr_enc;
+	u8 quantization = src_rgb ? ctx->dst_quantization : ctx->src_quantization;
+
+	switch (ycbcr_enc) {
+	case V4L2_YCBCR_ENC_601:
+		ctx->csc = FIMC_CSC_601;
+		break;
+	case V4L2_YCBCR_ENC_709:
+		ctx->csc = FIMC_CSC_709;
+		break;
+	default:
+		ctx->csc = FIMC_CSC_BY_SIZE;
+		break;
+	}
+
+	if (quantization == V4L2_QUANTIZATION_LIM_RANGE)
+		ctx->flags |= FIMC_COLOR_RANGE_NARROW;
+	else
+		ctx->flags &= ~FIMC_COLOR_RANGE_NARROW;
+}
+
 static int fimc_m2m_s_fmt_mplane(struct file *file, void *fh,
 				 struct v4l2_format *f)
 {
@@ -343,6 +372,8 @@ static int fimc_m2m_s_fmt_mplane(struct file *file, void *fh,
 	struct fimc_fmt *fmt;
 	struct vb2_queue *vq;
 	struct fimc_frame *frame;
+	u8 ycbcr_enc = f->fmt.pix_mp.ycbcr_enc;
+	u8 quantization = f->fmt.pix_mp.quantization;
 	int ret;
 
 	ret = fimc_try_fmt_mplane(ctx, f);
@@ -367,6 +398,17 @@ static int fimc_m2m_s_fmt_mplane(struct file *file, void *fh,
 		return -EINVAL;
 
 	__set_frame_format(frame, fmt, &f->fmt.pix_mp);
+
+	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
+		ctx->src_ycbcr_enc = ycbcr_enc;
+		ctx->src_quantization = quantization;
+	} else {
+		ctx->dst_ycbcr_enc = ycbcr_enc;
+		ctx->dst_quantization = quantization;
+	}
+	fimc_m2m_update_csc(ctx);
+	f->fmt.pix_mp.ycbcr_enc = ycbcr_enc;
+	f->fmt.pix_mp.quantization = quantization;
 
 	/* Update RGB Alpha control state and value range */
 	fimc_alpha_ctrl_update(ctx);

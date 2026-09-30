@@ -346,6 +346,14 @@ static void s5p_mfc_handle_frame_new(struct s5p_mfc_ctx *ctx, unsigned int err)
 						ctx->chroma_size);
 			clear_bit(dst_buf->b->vb2_buf.index,
 							&ctx->dec_dst_flag);
+			/*
+			 * s5p_mfc_handle_frame_copy_time() only covers frames
+			 * displayed in the run that decoded them. Where the
+			 * hardware supports frame tags, take the timestamp of
+			 * the displayed frame's own source buffer.
+			 */
+			s5p_mfc_hw_call(dev->mfc_ops, copy_dec_timestamp, ctx,
+					dst_buf->b);
 
 			vb2_buffer_done(&dst_buf->b->vb2_buf, err ?
 				VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
@@ -614,6 +622,8 @@ static void s5p_mfc_handle_stream_complete(struct s5p_mfc_ctx *ctx)
 		list_del(&mb_entry->list);
 		ctx->dst_queue_cnt--;
 		vb2_set_plane_payload(&mb_entry->b->vb2_buf, 0, 0);
+		/* The stateful encoder API marks the end of a drain this way. */
+		mb_entry->b->flags |= V4L2_BUF_FLAG_LAST;
 		vb2_buffer_done(&mb_entry->b->vb2_buf, VB2_BUF_STATE_DONE);
 	}
 
@@ -848,7 +858,7 @@ static int s5p_mfc_open(struct file *file)
 		q->io_modes = VB2_MMAP;
 		q->ops = get_dec_queue_ops();
 	} else if (vdev == dev->vfd_enc) {
-		q->io_modes = VB2_MMAP | VB2_USERPTR;
+		q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF;
 		q->ops = get_enc_queue_ops();
 	} else {
 		ret = -ENOENT;
@@ -875,7 +885,7 @@ static int s5p_mfc_open(struct file *file)
 		q->io_modes = VB2_MMAP;
 		q->ops = get_dec_queue_ops();
 	} else if (vdev == dev->vfd_enc) {
-		q->io_modes = VB2_MMAP | VB2_USERPTR;
+		q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF;
 		q->ops = get_enc_queue_ops();
 	} else {
 		ret = -ENOENT;

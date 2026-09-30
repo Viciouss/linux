@@ -153,9 +153,13 @@ static void fimc_hw_set_out_dma_size(struct fimc_ctx *ctx)
 	cfg = (frame->f_height << 16) | frame->f_width;
 	writel(cfg, dev->regs + FIMC_REG_ORGOSIZE);
 
-	/* Select color space conversion equation (HD/SD size).*/
+	/*
+	 * Select color space conversion equation: as requested for m2m, else
+	 * by HD/SD size.
+	 */
 	cfg = readl(dev->regs + FIMC_REG_CIGCTRL);
-	if (frame->f_width >= 1280) /* HD */
+	if (ctx->csc == FIMC_CSC_709 ||
+	    (ctx->csc == FIMC_CSC_BY_SIZE && frame->f_width >= 1280)) /* HD */
 		cfg |= FIMC_REG_CIGCTRL_CSC_ITU601_709;
 	else	/* SD */
 		cfg &= ~FIMC_REG_CIGCTRL_CSC_ITU601_709;

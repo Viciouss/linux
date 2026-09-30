@@ -1196,8 +1196,8 @@ static int enc_pre_frame_start(struct s5p_mfc_ctx *ctx)
 	unsigned int dst_size;
 
 	src_mb = list_entry(ctx->src_queue.next, struct s5p_mfc_buf, list);
-	src_y_addr = vb2_dma_contig_plane_dma_addr(&src_mb->b->vb2_buf, 0);
-	src_c_addr = vb2_dma_contig_plane_dma_addr(&src_mb->b->vb2_buf, 1);
+	src_y_addr = s5p_mfc_enc_src_addr(&src_mb->b->vb2_buf, 0);
+	src_c_addr = s5p_mfc_enc_src_addr(&src_mb->b->vb2_buf, 1);
 	s5p_mfc_hw_call(dev->mfc_ops, set_enc_frame_buffer, ctx,
 							src_y_addr, src_c_addr);
 
@@ -1218,6 +1218,7 @@ static int enc_post_frame_start(struct s5p_mfc_ctx *ctx)
 	unsigned long mb_y_addr, mb_c_addr;
 	int slice_type;
 	unsigned int strm_size;
+	u64 timestamp = 0;
 	bool src_ready;
 
 	slice_type = s5p_mfc_hw_call(dev->mfc_ops, get_enc_slice_type, dev);
@@ -1230,12 +1231,13 @@ static int enc_post_frame_start(struct s5p_mfc_ctx *ctx)
 		s5p_mfc_hw_call(dev->mfc_ops, get_enc_frame_buffer, ctx,
 				&enc_y_addr, &enc_c_addr);
 		list_for_each_entry(mb_entry, &ctx->src_queue, list) {
-			mb_y_addr = vb2_dma_contig_plane_dma_addr(
+			mb_y_addr = s5p_mfc_enc_src_addr(
 					&mb_entry->b->vb2_buf, 0);
-			mb_c_addr = vb2_dma_contig_plane_dma_addr(
+			mb_c_addr = s5p_mfc_enc_src_addr(
 					&mb_entry->b->vb2_buf, 1);
 			if ((enc_y_addr == mb_y_addr) &&
 						(enc_c_addr == mb_c_addr)) {
+				timestamp = mb_entry->b->vb2_buf.timestamp;
 				list_del(&mb_entry->list);
 				ctx->src_queue_cnt--;
 				vb2_buffer_done(&mb_entry->b->vb2_buf,
@@ -1244,12 +1246,13 @@ static int enc_post_frame_start(struct s5p_mfc_ctx *ctx)
 			}
 		}
 		list_for_each_entry(mb_entry, &ctx->ref_queue, list) {
-			mb_y_addr = vb2_dma_contig_plane_dma_addr(
+			mb_y_addr = s5p_mfc_enc_src_addr(
 					&mb_entry->b->vb2_buf, 0);
-			mb_c_addr = vb2_dma_contig_plane_dma_addr(
+			mb_c_addr = s5p_mfc_enc_src_addr(
 					&mb_entry->b->vb2_buf, 1);
 			if ((enc_y_addr == mb_y_addr) &&
 						(enc_c_addr == mb_c_addr)) {
+				timestamp = mb_entry->b->vb2_buf.timestamp;
 				list_del(&mb_entry->list);
 				ctx->ref_queue_cnt--;
 				vb2_buffer_done(&mb_entry->b->vb2_buf,
@@ -1287,6 +1290,8 @@ static int enc_post_frame_start(struct s5p_mfc_ctx *ctx)
 			mb_entry->b->flags |= V4L2_BUF_FLAG_BFRAME;
 			break;
 		}
+		/* Tag the stream with the timestamp of the encoded frame */
+		mb_entry->b->vb2_buf.timestamp = timestamp;
 		vb2_set_plane_payload(&mb_entry->b->vb2_buf, 0, strm_size);
 		vb2_buffer_done(&mb_entry->b->vb2_buf, VB2_BUF_STATE_DONE);
 	}
@@ -1489,9 +1494,10 @@ static int vidioc_reqbufs(struct file *file, void *priv,
 	struct s5p_mfc_ctx *ctx = fh_to_ctx(priv);
 	int ret = 0;
 
-	/* if memory is not mmp or userptr return error */
+	/* if memory is not mmap, userptr or dmabuf return error */
 	if ((reqbufs->memory != V4L2_MEMORY_MMAP) &&
-		(reqbufs->memory != V4L2_MEMORY_USERPTR))
+		(reqbufs->memory != V4L2_MEMORY_USERPTR) &&
+		(reqbufs->memory != V4L2_MEMORY_DMABUF))
 		return -EINVAL;
 	if (reqbufs->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		if (reqbufs->count == 0) {
@@ -1568,9 +1574,10 @@ static int vidioc_querybuf(struct file *file, void *priv,
 	struct s5p_mfc_ctx *ctx = fh_to_ctx(priv);
 	int ret = 0;
 
-	/* if memory is not mmp or userptr return error */
+	/* if memory is not mmap, userptr or dmabuf return error */
 	if ((buf->memory != V4L2_MEMORY_MMAP) &&
-		(buf->memory != V4L2_MEMORY_USERPTR))
+		(buf->memory != V4L2_MEMORY_USERPTR) &&
+		(buf->memory != V4L2_MEMORY_DMABUF))
 		return -EINVAL;
 	if (buf->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		if (ctx->state != MFCINST_GOT_INST) {
@@ -2278,6 +2285,16 @@ static int vidioc_g_parm(struct file *file, void *priv,
 	return 0;
 }
 
+static int vidioc_try_encoder_cmd(struct file *file, void *priv,
+				  struct v4l2_encoder_cmd *cmd)
+{
+	/* Only draining is supported; the instance can't restart after it. */
+	if (cmd->cmd != V4L2_ENC_CMD_STOP)
+		return -EINVAL;
+	cmd->flags = 0;
+	return 0;
+}
+
 static int vidioc_encoder_cmd(struct file *file, void *priv,
 			      struct v4l2_encoder_cmd *cmd)
 {
@@ -2331,6 +2348,43 @@ static int vidioc_subscribe_event(struct v4l2_fh *fh,
 	}
 }
 
+/*
+ * The hardware always encodes the whole img_width x img_height frame starting
+ * at the top left corner, so that is the only crop rectangle we can offer.
+ */
+static int vidioc_g_selection(struct file *file, void *priv,
+			      struct v4l2_selection *s)
+{
+	struct s5p_mfc_ctx *ctx = fh_to_ctx(priv);
+
+	if (s->type != V4L2_BUF_TYPE_VIDEO_OUTPUT)
+		return -EINVAL;
+
+	switch (s->target) {
+	case V4L2_SEL_TGT_CROP:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	s->r.left = 0;
+	s->r.top = 0;
+	s->r.width = ctx->img_width;
+	s->r.height = ctx->img_height;
+	return 0;
+}
+
+static int vidioc_s_selection(struct file *file, void *priv,
+			      struct v4l2_selection *s)
+{
+	if (s->target != V4L2_SEL_TGT_CROP)
+		return -EINVAL;
+
+	return vidioc_g_selection(file, priv, s);
+}
+
 static const struct v4l2_ioctl_ops s5p_mfc_enc_ioctl_ops = {
 	.vidioc_querycap = vidioc_querycap,
 	.vidioc_enum_fmt_vid_cap = vidioc_enum_fmt_vid_cap,
@@ -2350,7 +2404,10 @@ static const struct v4l2_ioctl_ops s5p_mfc_enc_ioctl_ops = {
 	.vidioc_streamoff = vidioc_streamoff,
 	.vidioc_s_parm = vidioc_s_parm,
 	.vidioc_g_parm = vidioc_g_parm,
+	.vidioc_g_selection = vidioc_g_selection,
+	.vidioc_s_selection = vidioc_s_selection,
 	.vidioc_encoder_cmd = vidioc_encoder_cmd,
+	.vidioc_try_encoder_cmd = vidioc_try_encoder_cmd,
 	.vidioc_subscribe_event = vidioc_subscribe_event,
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
 };

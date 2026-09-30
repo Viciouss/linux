@@ -1075,6 +1075,48 @@ static void s5p_mfc_set_flush(struct s5p_mfc_ctx *ctx, int flush)
 	mfc_write(dev, dpb, S5P_FIMV_SI_CH0_DPB_CONF_CTRL);
 }
 
+/*
+ * Tag the source buffer of the next decode run. The hardware reports the tag
+ * of the displayed frame in GET_FRAME_TAG_TOP, which can be a frame decoded
+ * runs earlier.
+ */
+static void s5p_mfc_set_dec_frame_tag_v5(struct s5p_mfc_ctx *ctx,
+					 struct s5p_mfc_buf *src)
+{
+	struct s5p_mfc_dec_tag *t;
+	u32 tag = 0;
+
+	if (src) {
+		if (++ctx->dec_next_tag == 0)
+			ctx->dec_next_tag = 1;
+		tag = ctx->dec_next_tag;
+		t = &ctx->dec_tags[tag % MFC_DEC_TAGS];
+		t->tag = tag;
+		t->timestamp = src->b->vb2_buf.timestamp;
+		t->timecode = src->b->timecode;
+		t->tstamp_flags = src->b->flags & V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
+	}
+	s5p_mfc_write_info_v5(ctx, tag, SET_FRAME_TAG);
+}
+
+/* Copy the timestamp of the displayed frame's source buffer to @dst */
+static int s5p_mfc_copy_dec_timestamp_v5(struct s5p_mfc_ctx *ctx,
+					 struct vb2_v4l2_buffer *dst)
+{
+	u32 tag = s5p_mfc_read_info_v5(ctx, GET_FRAME_TAG_TOP);
+	struct s5p_mfc_dec_tag *t = &ctx->dec_tags[tag % MFC_DEC_TAGS];
+
+	if (tag == 0 || t->tag != tag) {
+		mfc_debug(2, "No timestamp for frame tag %u\n", tag);
+		return -ENOENT;
+	}
+	dst->vb2_buf.timestamp = t->timestamp;
+	dst->timecode = t->timecode;
+	dst->flags &= ~V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
+	dst->flags |= t->tstamp_flags;
+	return 0;
+}
+
 /* Decode a single frame */
 static int s5p_mfc_decode_one_frame_v5(struct s5p_mfc_ctx *ctx,
 					enum s5p_mfc_decode_arg last_frame)
@@ -1138,6 +1180,10 @@ static int s5p_mfc_encode_one_frame_v5(struct s5p_mfc_ctx *ctx)
 		mfc_write(dev, 3, S5P_FIMV_ENC_MAP_FOR_CUR);
 	s5p_mfc_set_shared_buffer(ctx);
 
+	/* Frame type forcing applies to the next encoded frame only */
+	mfc_write(dev, ctx->force_frame_type, S5P_FIMV_ENC_SI_CH0_FRAME_INS);
+	ctx->force_frame_type = V4L2_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE_DISABLED;
+
 	if (ctx->state == MFCINST_FINISHING)
 		cmd = S5P_FIMV_CH_LAST_FRAME;
 	else
@@ -1165,6 +1211,7 @@ static int s5p_mfc_run_dec_frame(struct s5p_mfc_ctx *ctx, int last_frame)
 	if (ctx->state == MFCINST_FINISHING) {
 		last_frame = MFC_DEC_LAST_FRAME;
 		s5p_mfc_set_dec_stream_buffer_v5(ctx, 0, 0, 0);
+		s5p_mfc_set_dec_frame_tag_v5(ctx, NULL);
 		dev->curr_ctx = ctx->num;
 		s5p_mfc_decode_one_frame_v5(ctx, last_frame);
 		return 0;
@@ -1181,6 +1228,7 @@ static int s5p_mfc_run_dec_frame(struct s5p_mfc_ctx *ctx, int last_frame)
 	s5p_mfc_set_dec_stream_buffer_v5(ctx,
 		vb2_dma_contig_plane_dma_addr(&temp_vb->b->vb2_buf, 0),
 		ctx->consumed_stream, temp_vb->b->vb2_buf.planes[0].bytesused);
+	s5p_mfc_set_dec_frame_tag_v5(ctx, temp_vb);
 	dev->curr_ctx = ctx->num;
 	if (temp_vb->b->vb2_buf.planes[0].bytesused == 0) {
 		last_frame = MFC_DEC_LAST_FRAME;
@@ -1223,9 +1271,9 @@ static int s5p_mfc_run_enc_frame(struct s5p_mfc_ctx *ctx)
 						dev->dma_base[BANK_R_CTX]);
 			ctx->state = MFCINST_FINISHING;
 		} else {
-			src_y_addr = vb2_dma_contig_plane_dma_addr(
+			src_y_addr = s5p_mfc_enc_src_addr(
 					&src_mb->b->vb2_buf, 0);
-			src_c_addr = vb2_dma_contig_plane_dma_addr(
+			src_c_addr = s5p_mfc_enc_src_addr(
 					&src_mb->b->vb2_buf, 1);
 			s5p_mfc_set_enc_frame_buffer_v5(ctx, src_y_addr,
 								src_c_addr);
@@ -1613,6 +1661,7 @@ static struct s5p_mfc_hw_ops s5p_mfc_ops_v5 = {
 	.get_dec_status = s5p_mfc_get_dec_status_v5,
 	.get_dec_frame_type = s5p_mfc_get_dec_frame_type_v5,
 	.get_disp_frame_type = s5p_mfc_get_disp_frame_type_v5,
+	.copy_dec_timestamp = s5p_mfc_copy_dec_timestamp_v5,
 	.get_consumed_stream = s5p_mfc_get_consumed_stream_v5,
 	.get_int_reason = s5p_mfc_get_int_reason_v5,
 	.get_int_err = s5p_mfc_get_int_err_v5,

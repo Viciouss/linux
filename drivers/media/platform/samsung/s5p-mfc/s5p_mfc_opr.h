@@ -304,6 +304,8 @@ struct s5p_mfc_hw_ops {
 	int (*get_dec_status)(struct s5p_mfc_dev *dev);
 	int (*get_dec_frame_type)(struct s5p_mfc_dev *dev);
 	int (*get_disp_frame_type)(struct s5p_mfc_ctx *ctx);
+	int (*copy_dec_timestamp)(struct s5p_mfc_ctx *ctx,
+				  struct vb2_v4l2_buffer *dst);
 	int (*get_consumed_stream)(struct s5p_mfc_dev *dev);
 	int (*get_int_reason)(struct s5p_mfc_dev *dev);
 	int (*get_int_err)(struct s5p_mfc_dev *dev);
