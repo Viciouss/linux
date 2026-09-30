@@ -19,11 +19,24 @@
 #include <linux/iio/common/st_sensors.h>
 
 
+/* Read @len bytes starting at register @addr into @dst; no-op if @len is 0 */
+static int st_sensors_read_burst(struct st_sensor_data *sdata,
+				 unsigned int addr, u8 *dst, unsigned int len)
+{
+	if (len && regmap_bulk_read(sdata->regmap, addr, dst, len) < 0)
+		return -EIO;
+
+	return 0;
+}
+
 static int st_sensors_get_buffer_element(struct iio_dev *indio_dev, u8 *buf)
 {
 	struct st_sensor_data *sdata = iio_priv(indio_dev);
 	unsigned int num_data_channels = sdata->num_data_channels;
-	int i;
+	/* Pending burst: burst_len bytes from burst_addr into burst_dst */
+	unsigned int burst_addr = 0, burst_len = 0;
+	u8 *burst_dst = NULL;
+	int i, err;
 
 	for_each_set_bit(i, indio_dev->active_scan_mask, num_data_channels) {
 		const struct iio_chan_spec *channel = &indio_dev->channels[i];
@@ -32,17 +45,38 @@ static int st_sensors_get_buffer_element(struct iio_dev *indio_dev, u8 *buf)
 				     channel->scan_type.shift, 8);
 		unsigned int storage_bytes =
 			channel->scan_type.storagebits >> 3;
+		bool extends_burst;
 
 		buf = PTR_ALIGN(buf, storage_bytes);
-		if (regmap_bulk_read(sdata->regmap, channel->address,
-				     buf, bytes_to_read) < 0)
-			return -EIO;
+
+		/*
+		 * A channel joins the pending burst if its registers directly
+		 * follow the burst's registers and its data directly follows
+		 * the burst's data in the scan buffer. X/Y/Z then become one
+		 * transfer instead of three.
+		 */
+		extends_burst = burst_len &&
+				channel->address == burst_addr + burst_len &&
+				buf == burst_dst + burst_len;
+
+		if (!extends_burst) {
+			err = st_sensors_read_burst(sdata, burst_addr,
+						    burst_dst, burst_len);
+			if (err)
+				return err;
+
+			burst_addr = channel->address;
+			burst_dst = buf;
+			burst_len = 0;
+		}
+
+		burst_len += bytes_to_read;
 
 		/* Advance the buffer pointer */
 		buf += storage_bytes;
 	}
 
-	return 0;
+	return st_sensors_read_burst(sdata, burst_addr, burst_dst, burst_len);
 }
 
 irqreturn_t st_sensors_trigger_handler(int irq, void *p)
