@@ -95,9 +95,25 @@ static bool max77802_is_volatile_reg(struct device *dev, unsigned int reg)
 		max77802_rtc_is_volatile_reg(dev, reg));
 }
 
+static bool max77686_is_precious_reg(struct device *dev, unsigned int reg)
+{
+	return (reg == MAX77686_REG_INTSRC || reg == MAX77686_REG_INT1 ||
+		reg == MAX77686_REG_INT2);
+}
+
+static bool max77686_is_volatile_reg(struct device *dev, unsigned int reg)
+{
+	return (max77686_is_precious_reg(dev, reg) ||
+		reg == MAX77686_REG_STATUS1 || reg == MAX77686_REG_STATUS2 ||
+		reg == MAX77686_REG_PWRON);
+}
+
 static const struct regmap_config max77686_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
+	.precious_reg = max77686_is_precious_reg,
+	.volatile_reg = max77686_is_volatile_reg,
+	.cache_type = REGCACHE_RBTREE,
 };
 
 static const struct regmap_config max77802_regmap_config = {
