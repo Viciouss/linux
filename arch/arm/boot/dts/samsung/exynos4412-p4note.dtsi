@@ -607,6 +607,8 @@
 
 &fimc_2 {
 	status = "okay";
+	/* Used as a V4L2 m2m device for MFC format conversion */
+	/delete-property/ samsung,lcd-wb;
 	assigned-clocks = <&clock CLK_MOUT_FIMC2>,
 			<&clock CLK_SCLK_FIMC2>;
 	assigned-clock-parents = <&clock CLK_MOUT_MPLL_USER_T>;
