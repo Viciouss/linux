@@ -412,14 +412,14 @@
 			"LINE", "LINEOUT2N",
 			"LINE", "LINEOUT2P",
 
-			"IN1LP", "MICBIAS1",
-			"IN1LN", "MICBIAS1",
+			"IN1LP", "Main Mic",
+			"IN1LN", "Main Mic",
 			"Main Mic", "MICBIAS1",
 
 			"IN1RP", "Sub Mic",
 			"IN1RN", "Sub Mic",
 
-			"IN2LP:VXRN", "MICBIAS2",
+			"IN2LP:VXRN", "Headset Mic",
 			"Headset Mic", "MICBIAS2";
 
 		cpu {
