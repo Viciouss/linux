@@ -455,7 +455,7 @@ static struct attribute *mc96_attrs[] = {
 };
 ATTRIBUTE_GROUPS(mc96);
 
-static int mc96_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int mc96_probe(struct i2c_client *client)
 {
 	struct mc96_ir_data *data;
 	int i, ret;
@@ -494,7 +494,7 @@ static int mc96_probe(struct i2c_client *client, const struct i2c_device_id *id)
 			break;
 	}
 
-	sec_class = class_create(THIS_MODULE, "sec");
+	sec_class = class_create("sec");
 	if (IS_ERR(sec_class)) {
 		ret = PTR_ERR(sec_class);
 		dev_err(&client->dev, "failed to create sec class: %d\n", ret);

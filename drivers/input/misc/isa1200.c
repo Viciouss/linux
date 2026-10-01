@@ -543,7 +543,7 @@ static struct i2c_driver isa1200_i2c_driver = {
 		.of_match_table = isa1200_of_match,
 		.pm = &isa1200_pm_ops,
 	},
-	.probe_new = isa1200_probe,
+	.probe = isa1200_probe,
 };
 module_i2c_driver(isa1200_i2c_driver);
 

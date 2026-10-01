@@ -300,8 +300,7 @@ static const struct iio_info al3201_info = {
 	.attrs          = &al3201_attribute_group,
 };
 
-static int al3201_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int al3201_probe(struct i2c_client *client)
 {
 	struct al3201_data *data;
 	struct iio_dev *indio_dev;

@@ -1091,7 +1091,7 @@ static struct i2c_driver isx012_driver = {
 		.of_match_table	= of_match_ptr(isx012_of_match),
 		.name		= ISX012_DRV_NAME,
 	},
-	.probe_new	= isx012_probe,
+	.probe		= isx012_probe,
 	.remove		= isx012_remove,
 	.id_table	= isx012_ids,
 };
