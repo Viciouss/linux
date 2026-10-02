@@ -754,8 +754,7 @@
 		/* CAM_B_CLKOUT */
 		clocks = <&camera 1>;
 		clock-names = "extclk";
-		samsung,camclk-out = <1>;
-		gpios = <&gpj1 0 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpj1 0 GPIO_ACTIVE_LOW>;
 
 		port {
 			is_s5k6a3_ep: endpoint {
