@@ -6,6 +6,7 @@
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_net.h>
+#include <linux/mmc/sdio_func.h>
 
 #include <defs.h>
 #include "debug.h"
@@ -63,6 +64,58 @@ static int brcmf_of_get_country_codes(struct device *dev,
 	settings->country_codes = cc;
 
 	return 0;
+}
+
+/* Vendor tuple holding the module vendor ID */
+#define BRCMF_CIS_TUPLE_START	0x80
+#define BRCMF_CIS_TAG_VENDOR	0x81
+
+static void brcmf_of_get_module_board_type(struct device *dev,
+					   struct brcmf_mp_device *settings)
+{
+	struct sdio_func *func = dev_to_sdio_func(dev);
+	struct device_node *np = dev->of_node;
+	struct sdio_func_tuple *tpl;
+	const char *name;
+	const u8 *ids;
+	int count, len, id_len, i;
+
+	count = of_property_count_strings(np, "brcm,module-names");
+	ids = of_get_property(np, "brcm,module-ids", &len);
+	if (count <= 0 || !ids || !settings->board_type)
+		return;
+
+	if (len % count) {
+		brcmf_err("brcm,module-ids does not match brcm,module-names\n");
+		return;
+	}
+
+	for (tpl = func->tuples; tpl; tpl = tpl->next)
+		if (tpl->code == BRCMF_CIS_TUPLE_START && tpl->size > 1 &&
+		    tpl->data[0] == BRCMF_CIS_TAG_VENDOR)
+			break;
+	if (!tpl) {
+		brcmf_info("no module vendor ID in CIS\n");
+		return;
+	}
+
+	id_len = tpl->size - 1;
+	brcmf_info("module vendor ID %*ph\n", id_len, &tpl->data[1]);
+	if (len / count != id_len)
+		return;
+
+	for (i = 0; i < count; i++)
+		if (!memcmp(ids + i * id_len, &tpl->data[1], id_len))
+			break;
+	if (i == count ||
+	    of_property_read_string_index(np, "brcm,module-names", i, &name))
+		return;
+
+	settings->module_board_type = devm_kasprintf(dev, GFP_KERNEL, "%s.%s",
+						     settings->board_type,
+						     name);
+	brcmf_info("module %s, board type %s\n", name,
+		   settings->module_board_type);
 }
 
 void brcmf_of_probe(struct device *dev, enum brcmf_bus_type bus_type,
@@ -123,6 +176,8 @@ void brcmf_of_probe(struct device *dev, enum brcmf_bus_type bus_type,
 
 	if (bus_type != BRCMF_BUSTYPE_SDIO)
 		return;
+
+	brcmf_of_get_module_board_type(dev, settings);
 
 	if (of_property_read_u32(np, "brcm,drive-strength", &val) == 0)
 		sdio->drive_strength = val;

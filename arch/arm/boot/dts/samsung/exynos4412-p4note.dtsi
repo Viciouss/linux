@@ -1844,6 +1844,12 @@
 		interrupt-parent = <&gpx2>;
 		interrupts = <5 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "host-wake";
+
+		brcm,board-type = "samsung,p4note";
+		brcm,module-ids = [00 00 00 33 33
+				   00 00 00 fb 50
+				   00 20 c7 00 00];
+		brcm,module-names = "semco", "semcosh", "murata";
 	};
 };
 

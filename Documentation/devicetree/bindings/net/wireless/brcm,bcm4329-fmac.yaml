@@ -112,6 +112,21 @@ properties:
       this should be the Apple module-instance codename prefixed by "apple,",
       e.g. "apple,honshu".
 
+  brcm,module-ids:
+    $ref: /schemas/types.yaml#/definitions/uint8-array
+    description: Module vendor IDs as found in the vendor tuple (0x80 tuple
+      with subtag 0x81) of the SDIO CIS, concatenated. All IDs have the same
+      length, which is the length of this property divided by the number of
+      entries in brcm,module-names. Some boards were built with WiFi modules
+      from different vendors, each needing its own NVRAM file. When the ID of
+      the fitted module matches an entry, "<board-type>.<module-name>" is
+      tried before the board type when constructing firmware and NVRAM
+      configuration filenames.
+
+  brcm,module-names:
+    $ref: /schemas/types.yaml#/definitions/string-array
+    description: Names for the entries in brcm,module-ids, in the same order.
+
   apple,antenna-sku:
     $ref: /schemas/types.yaml#/definitions/string
     description: Antenna SKU used to identify a specific antenna configuration
@@ -123,6 +138,10 @@ properties:
 required:
   - compatible
   - reg
+
+dependencies:
+  brcm,module-ids: [ 'brcm,module-names' ]
+  brcm,module-names: [ 'brcm,module-ids' ]
 
 unevaluatedProperties: false
 

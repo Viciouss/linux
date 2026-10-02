@@ -40,6 +40,7 @@ extern struct brcmf_mp_global_t brcmf_mp_global;
  * @ignore_probe_fail: Ignore probe failure.
  * @trivial_ccode_map: Assume firmware uses ISO3166 country codes with rev 0
  * @country_codes: If available, pointer to struct for translating country codes
+ * @module_board_type: Board type with the fitted WiFi module's name appended.
  * @bus: Bus specific platform data. Only SDIO at the mmoment.
  */
 struct brcmf_mp_device {
@@ -52,6 +53,7 @@ struct brcmf_mp_device {
 	bool		trivial_ccode_map;
 	struct brcmfmac_pd_cc *country_codes;
 	const char	*board_type;
+	const char	*module_board_type;
 	unsigned char	mac[ETH_ALEN];
 	const char	*antenna_sku;
 	const void	*cal_blob;
