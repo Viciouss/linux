@@ -26,7 +26,7 @@ targets := Image zImage xipImage bootpImage uImage zImage-dtb
 # Device tree blob to append to zImage-dtb, selected by the defconfig
 DTB_NAME := $(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAME))
 FULL_DTB_NAME := $(addsuffix .dtb,$(DTB_NAME))
-DTB_RESULT := $(addprefix $(obj)/dts/,$(FULL_DTB_NAME))
+DTB_RESULT := $(addprefix $(obj)/dts/samsung/,$(FULL_DTB_NAME))
 
 ifeq ($(CONFIG_XIP_KERNEL),y)
 
