@@ -4922,6 +4922,12 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg)
 	dev_dbg(dev, "RXFIFO size: %d\n", hsotg->params.g_rx_fifo_size);
 
 	hsotg->gadget.max_speed = USB_SPEED_HIGH;
+	/*
+	 * OUT transfers are programmed in whole packets, so more data than
+	 * requested can be written to the buffer. Let function drivers like
+	 * f_fs allocate buffers aligned to wMaxPacketSize.
+	 */
+	hsotg->gadget.quirk_ep_out_aligned_size = true;
 	hsotg->gadget.ops = &dwc2_hsotg_gadget_ops;
 	hsotg->gadget.name = dev_name(dev);
 	hsotg->remote_wakeup_allowed = 0;
