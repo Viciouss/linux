@@ -26,6 +26,7 @@
 #include <linux/iio/sysfs.h>
 #include <linux/mutex.h>
 #include <linux/delay.h>
+#include <linux/math64.h>
 
 #define AL3201_DRV_NAME		"al3201"
 #define DRIVER_VERSION		"1.9"
@@ -36,6 +37,10 @@
 #define AL3201_RAN_MASK		0x01
 #define AL3201_RAN_SHIFT	(0)
 
+#define AL3201_RT_COMMAND	0x02
+#define AL3201_RT_MASK		0x03
+#define AL3201_RT_SHIFT		(0)
+
 #define AL3201_POW_COMMAND	0x00
 #define AL3201_POW_MASK		0x03
 #define AL3201_POW_UP		0x03
@@ -45,26 +50,29 @@
 #define	AL3201_ADC_LSB		0x0c
 #define	AL3201_ADC_MSB		0x0d
 
+/* 0: 0 to 32768 lux, 1: 0 to 8192 lux */
+#define AL3201_RANGE_HIGH_RES	1
+/* 200ms low pass filter */
+#define AL3201_RT_200MS		0x02
+/* time until the first sample is valid after power up */
+#define AL3201_POWER_UP_MS	180
+/* counts at or below this are noise */
+#define AL3201_DARK_COUNT	5
+
 static u8 al3201_reg[AL3201_NUM_CACHABLE_REGS] = {
 	0x00, 0x01, 0x02, 0x0c, 0x0d
 };
 
-static int al3201_range[2] = { 32768, 8192 };
+/* micro lux per count, indexed by range */
+static const int al3201_ulux_per_count[2] = { 500000, 125000 };
 
 struct al3201_data {
 	struct i2c_client *client;
-	struct mutex lock; /* protects register access */
+	struct mutex lock; /* protects register access and power state */
 	u8 reg_cache[AL3201_NUM_CACHABLE_REGS];
 };
 
 static int cali = 100;
-
-#define AL3201_SCALE_AVAILABLE "0.032 0.008"
-
-static const int al3201_scales[][2] = {
-	{0, 32768},
-	{0, 8192}
-};
 
 static int __al3201_read_reg(struct al3201_data *data,
 			     u32 reg, u8 mask, u8 shift)
@@ -72,6 +80,7 @@ static int __al3201_read_reg(struct al3201_data *data,
 	return (data->reg_cache[reg] & mask) >> shift;
 }
 
+/* must be called with data->lock held */
 static int __al3201_write_reg(struct al3201_data *data,
 			      u32 reg, u8 mask, u8 shift, u8 val)
 {
@@ -81,8 +90,6 @@ static int __al3201_write_reg(struct al3201_data *data,
 	if (reg >= AL3201_NUM_CACHABLE_REGS)
 		return -EINVAL;
 
-	mutex_lock(&data->lock);
-
 	tmp = data->reg_cache[reg];
 	tmp &= ~mask;
 	tmp |= val << shift;
@@ -91,17 +98,13 @@ static int __al3201_write_reg(struct al3201_data *data,
 	if (!ret)
 		data->reg_cache[reg] = tmp;
 
-	mutex_unlock(&data->lock);
 	return ret;
 }
 
 static int al3201_get_range(struct al3201_data *data)
 {
-	int tmp;
-
-	tmp = __al3201_read_reg(data, AL3201_RAN_COMMAND,
-				AL3201_RAN_MASK, AL3201_RAN_SHIFT);
-	return al3201_range[tmp];
+	return __al3201_read_reg(data, AL3201_RAN_COMMAND,
+				 AL3201_RAN_MASK, AL3201_RAN_SHIFT);
 }
 
 static int al3201_set_range(struct al3201_data *data, int range)
@@ -110,12 +113,11 @@ static int al3201_set_range(struct al3201_data *data, int range)
 				  AL3201_RAN_MASK, AL3201_RAN_SHIFT, range);
 }
 
-/*
- * static int al3201_get_resolution(struct al3201_data *data)
- * {
- *         return (al3201_get_range(data)) ? 2 : 8;
- * }
- */
+static int al3201_set_response_time(struct al3201_data *data, int time)
+{
+	return __al3201_write_reg(data, AL3201_RT_COMMAND,
+				  AL3201_RT_MASK, AL3201_RT_SHIFT, time);
+}
 
 static int al3201_set_power_state(struct al3201_data *data, int state)
 {
@@ -125,46 +127,51 @@ static int al3201_set_power_state(struct al3201_data *data, int state)
 }
 
 /*
- * static int al3201_get_power_state(struct al3201_data *data)
- * {
- *         u8 cmdreg = data->reg_cache[AL3201_POW_COMMAND];
- *         return (cmdreg & AL3201_POW_MASK) >> AL3201_POW_SHIFT;
- * }
+ * The chip is kept powered down and only woken up for a measurement. The
+ * configuration is written every time, the registers may have been reset
+ * while the chip was not in use.
  */
-
 static int al3201_get_adc_value(struct al3201_data *data)
 {
-	int lsb, msb, range;
-	u32 val;
+	int lsb, msb, ret;
 
 	mutex_lock(&data->lock);
+
+	ret = al3201_set_range(data, AL3201_RANGE_HIGH_RES);
+	if (ret < 0)
+		goto out_unlock;
+
+	ret = al3201_set_response_time(data, AL3201_RT_200MS);
+	if (ret < 0)
+		goto out_unlock;
+
+	ret = al3201_set_power_state(data, 1);
+	if (ret < 0)
+		goto out_unlock;
+
+	msleep(AL3201_POWER_UP_MS);
+
 	lsb = i2c_smbus_read_byte_data(data->client, AL3201_ADC_LSB);
-
-	if (lsb < 0) {
-		mutex_unlock(&data->lock);
-		return lsb;
-	}
-
 	msb = i2c_smbus_read_byte_data(data->client, AL3201_ADC_MSB);
 
+	al3201_set_power_state(data, 0);
+
+	if (lsb < 0)
+		ret = lsb;
+	else if (msb < 0)
+		ret = msb;
+	else
+		ret = msb << 8 | lsb;
+
+out_unlock:
 	mutex_unlock(&data->lock);
-
-	if (msb < 0)
-		return msb;
-
-	range = al3201_get_range(data);
-
-	val = (u32)((msb << 8 | lsb) >> (range == 32768 ? 1 : 3));
-	val *= cali;
-
-	return (val / 100);
+	return ret;
 }
 
 static const struct iio_chan_spec al3201_channels[] = {
 	{
 		.type   = IIO_LIGHT,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW)
-				/*| BIT(IIO_CHAN_INFO_SCALE) */
 				| BIT(IIO_CHAN_INFO_PROCESSED),
 	}
 };
@@ -182,7 +189,8 @@ static ssize_t in_illuminance_calibration_store(struct device *dev,
 {
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct al3201_data *data = iio_priv(indio_dev);
-	int stdls, lux;
+	int stdls, adc;
+	u64 ulux;
 	char tmp[10] = {0};
 
 	int n = sscanf(buf, "%d %9s", &stdls, tmp);
@@ -200,19 +208,22 @@ static ssize_t in_illuminance_calibration_store(struct device *dev,
 		return -EINVAL;
 	}
 
-	lux = al3201_get_adc_value(data);
-	cali = stdls * 100 / lux;
+	adc = al3201_get_adc_value(data);
+	if (adc < 0)
+		return adc;
+	if (adc == 0)
+		return -ENODATA;
+
+	ulux = (u64)adc * al3201_ulux_per_count[al3201_get_range(data)];
+	cali = div64_u64((u64)stdls * 100 * 1000000, ulux);
 
 	return count;
 }
 
 static DEVICE_ATTR_RW(in_illuminance_calibration);
 
-static IIO_CONST_ATTR(in_illuminance_scale_available, AL3201_SCALE_AVAILABLE);
-
 static struct attribute *al3201_attributes[] = {
 	&dev_attr_in_illuminance_calibration.attr,
-	&iio_const_attr_in_illuminance_scale_available.dev_attr.attr,
 	NULL,
 };
 
@@ -225,55 +236,36 @@ static int al3201_read_raw(struct iio_dev *indio_dev,
 			   int *val2, long mask)
 {
 	struct al3201_data *data = iio_priv(indio_dev);
+	u64 ulux;
+	u32 rem;
 	int ret;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_PROCESSED:
-		*val = al3201_get_adc_value(data);
-		return IIO_VAL_INT;
+		ret = al3201_get_adc_value(data);
+		if (ret < 0)
+			return ret;
+		if (ret <= AL3201_DARK_COUNT)
+			ret = 0;
+
+		ulux = (u64)ret * al3201_ulux_per_count[al3201_get_range(data)];
+		ulux = div_u64(ulux * cali, 100);
+		*val = div_u64_rem(ulux, 1000000, &rem);
+		*val2 = rem;
+		return IIO_VAL_INT_PLUS_MICRO;
 	case IIO_CHAN_INFO_RAW:
-		/*
-		 * ALS ADC value is stored in two adjacent registers:
-		 * - low byte of output is stored at AL3201_ADC_LSB
-		 * - high byte of output is stored at AL3201_ADC_LSB + 1
-		 */
-		ret = i2c_smbus_read_word_data(data->client,
-					       AL3201_ADC_LSB);
+		ret = al3201_get_adc_value(data);
 		if (ret < 0)
 			return ret;
 		*val = ret;
 		return IIO_VAL_INT;
-	case IIO_CHAN_INFO_SCALE:
-		*val = 0;
-		*val2 = al3201_get_range(data);
-		return IIO_VAL_INT_PLUS_MICRO;
 	}
-	return -EINVAL;
-}
-
-static int al3201_write_raw(struct iio_dev *indio_dev,
-			    struct iio_chan_spec const *chan, int val,
-			    int val2, long mask)
-{
-	struct al3201_data *data = iio_priv(indio_dev);
-	int i;
-
-	switch (mask) {
-	case IIO_CHAN_INFO_SCALE:
-		for (i = 0; i < ARRAY_SIZE(al3201_scales); i++) {
-			if (val == al3201_scales[i][0] &&
-			    val2 == al3201_scales[i][1])
-				return al3201_set_range(data, val2);
-		}
-		break;
-	}
-
 	return -EINVAL;
 }
 
 static int al3201_init(struct al3201_data *data)
 {
-	int i;
+	int i, ret;
 
 	/*
 	 * read all the registers once to fill the cache.
@@ -288,15 +280,20 @@ static int al3201_init(struct al3201_data *data)
 		data->reg_cache[i] = v;
 	}
 
-	/* set defaults */
-	al3201_set_range(data, 0);
-	al3201_set_power_state(data, 1);
-	return 0;
+	/* set defaults, the chip is powered up on demand */
+	mutex_lock(&data->lock);
+	ret = al3201_set_range(data, AL3201_RANGE_HIGH_RES);
+	if (!ret)
+		ret = al3201_set_response_time(data, AL3201_RT_200MS);
+	if (!ret)
+		ret = al3201_set_power_state(data, 0);
+	mutex_unlock(&data->lock);
+
+	return ret;
 }
 
 static const struct iio_info al3201_info = {
 	.read_raw       = al3201_read_raw,
-	.write_raw      = al3201_write_raw,
 	.attrs          = &al3201_attribute_group,
 };
 
@@ -335,7 +332,9 @@ static void al3201_remove(struct i2c_client *client)
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct al3201_data *data = iio_priv(indio_dev);
 
+	mutex_lock(&data->lock);
 	al3201_set_power_state(data, 0);
+	mutex_unlock(&data->lock);
 }
 
 static const struct i2c_device_id al3201_id[] = {
