@@ -16,6 +16,7 @@
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
+#include <linux/reboot.h>
 #include <linux/regmap.h>
 
 static struct regmap *map;
@@ -39,6 +40,20 @@ static void syscon_poweroff(void)
 		pr_emerg("Unable to poweroff system\n");
 	}
 }
+
+static int p4note_restart_handle(struct notifier_block *this,
+				 unsigned long mode, void *cmd)
+{
+	/* Don't enter lpm mode */
+	regmap_write(map, lpm_offset, 0x12345678);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block p4note_restart_nb = {
+	.notifier_call = p4note_restart_handle,
+	.priority = 193,	/* before the SWRESET syscon-reboot handler */
+};
 
 static int syscon_poweroff_probe(struct platform_device *pdev)
 {
@@ -94,13 +109,15 @@ static int syscon_poweroff_probe(struct platform_device *pdev)
 
 	pm_power_off = syscon_poweroff;
 
-	return 0;
+	return register_restart_handler(&p4note_restart_nb);
 }
 
 static int syscon_poweroff_remove(struct platform_device *pdev)
 {
 	if (pm_power_off == syscon_poweroff)
 		pm_power_off = NULL;
+
+	unregister_restart_handler(&p4note_restart_nb);
 
 	return 0;
 }
