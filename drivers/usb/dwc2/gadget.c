@@ -5004,6 +5004,12 @@ int dwc2_gadget_init(struct dwc2_hsotg *hsotg)
 		break;
 	}
 
+	/*
+	 * OUT transfers are programmed in whole packets, so more data than
+	 * requested can be written to the buffer. Let function drivers like
+	 * f_fs allocate buffers aligned to wMaxPacketSize.
+	 */
+	hsotg->gadget.quirk_ep_out_aligned_size = true;
 	hsotg->gadget.ops = &dwc2_hsotg_gadget_ops;
 	hsotg->gadget.name = dev_name(dev);
 	hsotg->gadget.otg_caps = &hsotg->params.otg_caps;
